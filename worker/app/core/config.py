@@ -17,17 +17,31 @@ DEFAULT_ORPHAN_TIMEOUT_SECONDS: int = 90       # 3 × heartbeat
 DEFAULT_POLL_INTERVAL_SECONDS: int = 2
 DEFAULT_MAX_RETRY_DELAY_SECONDS: int = 3600    # cap so jobs can't land days away
 
+# Valid worker type values — kept here so both the worker and the claim query
+# reference the same constants rather than scattered strings.
+WORKER_TYPE_STANDARD = "standard"
+WORKER_TYPE_HIGH_COMPUTE = "high_compute"
+
 
 class WorkerSettings(BaseSettings):
     """Worker configuration from environment / .env file."""
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # ─── Database ─────────────────────────────────────────────────────────────
     database_url: str
 
+    # ─── API Base URL ─────────────────────────────────────────────────────────
+    api_base_url: str | None = None
+
     # ─── Identity ─────────────────────────────────────────────────────────────
     worker_id: str = "worker-1"
+
+    # ─── Worker capability (Phase 9.1) ────────────────────────────────────────
+    # Declares what kind of jobs this worker can handle. The claim query
+    # filters by this value so only matching workers pick up each queue's jobs.
+    # Valid values: 'standard', 'high_compute'
+    worker_type: str = WORKER_TYPE_STANDARD
 
     # ─── Timing ───────────────────────────────────────────────────────────────
     poll_interval_seconds: int = DEFAULT_POLL_INTERVAL_SECONDS

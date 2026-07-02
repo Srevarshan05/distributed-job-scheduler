@@ -24,6 +24,7 @@ class OrgResponse(BaseModel):
     slug: str
     is_active: bool
     created_at: datetime
+    role: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -32,6 +33,24 @@ class OrgMemberResponse(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
     user_id: uuid.UUID
+    role: str
+    joined_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MemberCreateRequest(BaseModel):
+    full_name: str = Field(min_length=1, max_length=255)
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=6, max_length=255)
+    role: str = Field(default="member_read_only")
+
+
+class OrgMemberDetailResponse(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    email: str
+    full_name: str | None
     role: str
     joined_at: datetime
 

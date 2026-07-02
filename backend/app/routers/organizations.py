@@ -13,9 +13,16 @@ from sqlalchemy.future import select
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError
+from app.core.security import hash_password
 from app.models.organizations import OrgMember, Organization
 from app.models.users import User
-from app.schemas.organizations import OrgCreateRequest, OrgResponse, OrgUpdateRequest
+from app.schemas.organizations import (
+    OrgCreateRequest,
+    OrgResponse,
+    OrgUpdateRequest,
+    MemberCreateRequest,
+    OrgMemberDetailResponse,
+)
 from app.schemas.pagination import PaginatedResponse, PaginationParams
 
 router = APIRouter(prefix="/orgs", tags=["organizations"])
@@ -69,18 +76,23 @@ async def list_orgs(
     """List all organizations the current user belongs to."""
     params = PaginationParams(page=page, page_size=page_size)
 
-    # Count
-    count_result = await db.execute(
-        select(Organization)
+    # Fetch rows
+    result = await db.execute(
+        select(Organization, OrgMember.role)
         .join(OrgMember, OrgMember.org_id == Organization.id)
         .where(OrgMember.user_id == current_user.id, Organization.is_active == True)  # noqa: E712
     )
-    all_orgs = count_result.scalars().all()
+    rows = result.all()
 
-    paginated = all_orgs[params.offset : params.offset + params.page_size]
+    paginated = rows[params.offset : params.offset + params.page_size]
+    items = []
+    for org, role in paginated:
+        org.role = role
+        items.append(OrgResponse.model_validate(org))
+
     return PaginatedResponse.build(
-        items=[OrgResponse.model_validate(o) for o in paginated],
-        total=len(all_orgs),
+        items=items,
+        total=len(rows),
         params=params,
     )
 
@@ -92,13 +104,14 @@ async def get_org(
     current_user: User = Depends(get_current_user),
 ) -> Organization:
     """Get one organization the caller belongs to."""
-    await _require_org_member(org_id, current_user, db)
+    membership = await _require_org_member(org_id, current_user, db)
     result = await db.execute(
         select(Organization).where(Organization.id == org_id, Organization.is_active == True)  # noqa: E712
     )
     org = result.scalar_one_or_none()
     if org is None:
         raise NotFoundError("Organization", str(org_id))
+    org.role = membership.role
     return org
 
 
@@ -145,3 +158,82 @@ async def soft_delete_org(
         raise NotFoundError("Organization", str(org_id))
 
     org.is_active = False
+
+
+@router.get("/{org_id}/members", response_model=list[OrgMemberDetailResponse])
+async def list_members(
+    org_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[OrgMemberDetailResponse]:
+    """List all members in the organization."""
+    await _require_org_member(org_id, current_user, db)
+
+    result = await db.execute(
+        select(OrgMember, User)
+        .join(User, OrgMember.user_id == User.id)
+        .where(OrgMember.org_id == org_id)
+    )
+    rows = result.all()
+
+    items = []
+    for member, user in rows:
+        items.append(OrgMemberDetailResponse(
+            id=member.id,
+            user_id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            role=member.role,
+            joined_at=member.joined_at,
+        ))
+    return items
+
+
+@router.post("/{org_id}/members", response_model=OrgMemberDetailResponse, status_code=201)
+async def create_member(
+    org_id: uuid.UUID,
+    body: MemberCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> OrgMemberDetailResponse:
+    """Create a new user and add them to the organization with a role."""
+    caller_membership = await _require_org_member(org_id, current_user, db)
+    if caller_membership.role != "owner":
+        raise ForbiddenError("Only organization owners can manage members.")
+
+    # Check if user already exists
+    user_result = await db.execute(select(User).where(User.email == body.email))
+    user = user_result.scalar_one_or_none()
+    if user is None:
+        user = User(
+            email=body.email,
+            hashed_password=hash_password(body.password),
+            full_name=body.full_name,
+        )
+        db.add(user)
+        await db.flush()
+
+    # Check if membership already exists
+    mem_check = await db.execute(
+        select(OrgMember).where(OrgMember.org_id == org_id, OrgMember.user_id == user.id)
+    )
+    if mem_check.scalar_one_or_none() is not None:
+        raise ConflictError(f"User '{body.email}' is already a member of this organization.")
+
+    # Create membership
+    member = OrgMember(
+        org_id=org_id,
+        user_id=user.id,
+        role=body.role,
+    )
+    db.add(member)
+    await db.flush()
+
+    return OrgMemberDetailResponse(
+        id=member.id,
+        user_id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        role=member.role,
+        joined_at=member.joined_at,
+    )

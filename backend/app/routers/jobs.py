@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -25,7 +26,7 @@ from app.models.jobs import (
     Job,
 )
 from app.models.organizations import OrgMember
-from app.models.projects import Queue
+from app.models.projects import Project, Queue
 from app.models.users import User
 from app.schemas.jobs import (
     DLQEntryResponse,
@@ -61,8 +62,6 @@ async def _resolve_queue_and_check_access(
         raise NotFoundError("Queue", str(queue_id))
 
     # Verify org membership via the project → org chain
-    from app.models.projects import Project
-
     project_result = await db.execute(select(Project).where(Project.id == queue.project_id))
     project = project_result.scalar_one_or_none()
     if project is None:
@@ -111,6 +110,8 @@ async def create_job(
     await _resolve_queue_and_check_access(queue_id, current_user, db)
     job = _build_job(queue_id, body, current_user.id)
     db.add(job)
+    await db.flush()
+    await db.refresh(job)
     return job
 
 
@@ -125,6 +126,9 @@ async def create_jobs_batch(
     await _resolve_queue_and_check_access(queue_id, current_user, db)
     jobs = [_build_job(queue_id, req, current_user.id) for req in body.jobs]
     db.add_all(jobs)
+    await db.flush()
+    for j in jobs:
+        await db.refresh(j)
     return jobs
 
 
@@ -164,9 +168,15 @@ async def get_job(
     job_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> Job:
-    """Get full job detail including run history and logs."""
-    await _resolve_queue_and_check_access(queue_id, current_user, db)
+) -> JobDetailResponse:
+    """Get full job detail: overview, live queue position, attempt history, logs.
+
+    queue_position is computed live from the DB at request time — it is the
+    number of jobs ahead of this one under the queue's scheduling policy.
+    It is None when the job is not in a queued/scheduled state.
+    """
+    queue = await _resolve_queue_and_check_access(queue_id, current_user, db)
+
     result = await db.execute(
         select(Job)
         .where(Job.id == job_id, Job.queue_id == queue_id)
@@ -175,7 +185,89 @@ async def get_job(
     job = result.scalar_one_or_none()
     if job is None:
         raise NotFoundError("Job", str(job_id))
-    return job
+
+    # ── Live queue position ────────────────────────────────────────────────
+    queue_position: int | None = None
+    if job.status in (JOB_STATUS_QUEUED, JOB_STATUS_SCHEDULED):
+        policy = getattr(queue, "scheduling_policy", "priority")
+        if policy == "fifo":
+            pos_result = await db.execute(
+                select(func.count()).select_from(Job).where(
+                    Job.queue_id == queue_id,
+                    Job.status.in_([JOB_STATUS_QUEUED, JOB_STATUS_SCHEDULED]),
+                    Job.run_at <= job.run_at,
+                    Job.created_at < job.created_at,
+                )
+            )
+        else:
+            # priority and fair_share: higher priority first, then earlier creation
+            pos_result = await db.execute(
+                select(func.count()).select_from(Job).where(
+                    Job.queue_id == queue_id,
+                    Job.status.in_([JOB_STATUS_QUEUED, JOB_STATUS_SCHEDULED]),
+                    (
+                        (Job.priority > job.priority) |
+                        ((Job.priority == job.priority) & (Job.created_at < job.created_at))
+                    ),
+                )
+            )
+        queue_position = pos_result.scalar_one()
+
+    # ── Claimed worker hostname ────────────────────────────────────────────
+    claimed_hostname: str | None = None
+    if job.claimed_by_worker_id:
+        from app.models.workers import Worker
+        wk_result = await db.execute(
+            select(Worker).where(Worker.worker_id == job.claimed_by_worker_id)
+        )
+        wk = wk_result.scalar_one_or_none()
+        if wk is not None:
+            claimed_hostname = wk.hostname
+
+    # ── Submitting user email ──────────────────────────────────────────────
+    created_by_email: str | None = None
+    if job.created_by_user_id:
+        from app.models.users import User as UserModel
+        u_result = await db.execute(
+            select(UserModel).where(UserModel.id == job.created_by_user_id)
+        )
+        u = u_result.scalar_one_or_none()
+        if u is not None:
+            created_by_email = u.email
+
+    # ── AI Failure Summary (Phase 10.5) ────────────────────────────────────
+    ai_failure_summary: str | None = None
+    if job.status == "dead":
+        from app.models.dlq import DeadLetterEntry
+        dlq_result = await db.execute(
+            select(DeadLetterEntry.ai_failure_summary)
+            .where(DeadLetterEntry.job_id == job_id)
+        )
+        ai_failure_summary = dlq_result.scalar_one_or_none()
+
+    return JobDetailResponse(
+        id=job.id,
+        queue_id=job.queue_id,
+        job_type=job.job_type,
+        payload=job.payload,
+        priority=job.priority,
+        status=job.status,
+        attempts_made=job.attempts_made,
+        max_attempts=job.max_attempts,
+        run_at=job.run_at,
+        cron_expression=job.cron_expression,
+        claimed_by_worker_id=job.claimed_by_worker_id,
+        claimed_at=job.claimed_at,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        queue_name=queue.name,
+        queue_position=queue_position,
+        claimed_worker_hostname=claimed_hostname,
+        created_by_email=created_by_email,
+        runs=job.runs,
+        logs=sorted(job.logs, key=lambda l: l.logged_at),
+        ai_failure_summary=ai_failure_summary,
+    )
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobCancelResponse)
@@ -227,12 +319,21 @@ async def list_dlq(
     result = await db.execute(
         select(DeadLetterEntry)
         .where(DeadLetterEntry.queue_id == queue_id)
+        .options(selectinload(DeadLetterEntry.job))
         .order_by(DeadLetterEntry.promoted_at.desc())
     )
     all_entries = result.scalars().all()
     paginated = all_entries[params.offset : params.offset + params.page_size]
+
+    items = []
+    for e in paginated:
+        resp = DLQEntryResponse.model_validate(e)
+        if e.job:
+            resp.job_type = e.job.job_type
+        items.append(resp)
+
     return PaginatedResponse.build(
-        items=[DLQEntryResponse.model_validate(e) for e in paginated],
+        items=items,
         total=len(all_entries),
         params=params,
     )

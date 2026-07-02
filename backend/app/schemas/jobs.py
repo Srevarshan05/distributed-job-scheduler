@@ -43,6 +43,7 @@ class JobRunResponse(BaseModel):
 
 class JobLogResponse(BaseModel):
     id: uuid.UUID
+    run_id: uuid.UUID | None
     level: str
     message: str
     logged_at: datetime
@@ -70,10 +71,24 @@ class JobResponse(BaseModel):
 
 
 class JobDetailResponse(JobResponse):
-    """Full job detail including run history and logs."""
+    """Full job detail including enriched context, run history, and logs.
 
+    Phase 9.3 additions:
+    - queue_name: human-readable name of the queue (avoids a separate fetch)
+    - queue_position: live rank among queued jobs — 0 means next to run,
+      None means the job is not in a queued/scheduled state
+    - claimed_worker_hostname: hostname of the worker that claimed this job
+    - created_by_email: email address of the submitting user
+    - runs / logs: full attempt history and structured log stream
+    - ai_failure_summary: optional AI-generated summary of failure
+    """
+    queue_name: str | None = None
+    queue_position: int | None = None
+    claimed_worker_hostname: str | None = None
+    created_by_email: str | None = None
     runs: list[JobRunResponse] = []
     logs: list[JobLogResponse] = []
+    ai_failure_summary: str | None = None
 
 
 # ── Dead-letter queue ─────────────────────────────────────────────────────────
@@ -88,6 +103,9 @@ class DLQEntryResponse(BaseModel):
     retried_at: datetime | None
     retried_by_user_id: uuid.UUID | None
     retry_job_id: uuid.UUID | None
+    job_type: str | None = None
+    ai_failure_summary: str | None = None
+    ai_summary_generated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

@@ -48,6 +48,8 @@ class QueueCreateRequest(BaseModel):
     retry_limit: int = Field(default=3, ge=0, le=50)
     retry_strategy: RetryStrategy = "exponential"
     retry_delay_seconds: int = Field(default=60, ge=1)
+    required_worker_type: str = Field(default="standard", max_length=50)
+    scheduling_policy: Literal["priority", "fifo", "fair_share"] = "priority"
 
 
 class QueueUpdateRequest(BaseModel):
@@ -58,6 +60,8 @@ class QueueUpdateRequest(BaseModel):
     retry_strategy: RetryStrategy | None = None
     retry_delay_seconds: int | None = Field(default=None, ge=1)
     is_paused: bool | None = None
+    required_worker_type: str | None = Field(default=None, max_length=50)
+    scheduling_policy: Literal["priority", "fifo", "fair_share"] | None = None
 
 
 class QueueResponse(BaseModel):
@@ -70,6 +74,8 @@ class QueueResponse(BaseModel):
     retry_limit: int
     retry_strategy: str
     retry_delay_seconds: int
+    required_worker_type: str
+    scheduling_policy: str
     is_paused: bool
     is_active: bool
     created_at: datetime

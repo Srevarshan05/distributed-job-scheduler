@@ -15,10 +15,11 @@ fails, the job stays in 'claimed' and the orphan recovery will re-queue it.
 import logging
 import time
 import uuid
+import json
 from datetime import datetime, timedelta, timezone
 
 from croniter import croniter
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import broadcast
@@ -40,12 +41,18 @@ RUN_STATUS_COMPLETED = "completed"
 RUN_STATUS_FAILED = "failed"
 
 
-async def execute_job(db: AsyncSession, job: dict, worker_id: str) -> None:
+async def execute_job(
+    db: AsyncSession, job: dict, worker_id: str,
+    worker_type: str = "standard", scheduling_policy: str = "priority"
+) -> None:
     """Run one execution attempt of `job` on behalf of `worker_id`.
 
     `job` is the raw dict returned by `claim_next_job`. The function is
     intentionally decoupled from the ORM — it uses raw SQL via the session
     to avoid loading the full model graph on every execution.
+
+    `worker_type` and `scheduling_policy` are recorded in job_logs at claim
+    time so the scheduling decision is visible in the job's log stream.
     """
     job_id: str = str(job["id"])
     job_type: str = job["job_type"]
@@ -57,15 +64,13 @@ async def execute_job(db: AsyncSession, job: dict, worker_id: str) -> None:
 
     # ── Transition to 'running', write the JobRun row ──────────────────────
     await db.execute(
-        __import__("sqlalchemy", fromlist=["text"]).text(
-            "UPDATE jobs SET status='running', attempts_made=:att WHERE id=:jid"
-        ),
+        text("UPDATE jobs SET status='running', attempts_made=:att WHERE id=:jid"),
         {"att": attempts_made, "jid": job_id},
     )
 
     run_id = str(uuid.uuid4())
     await db.execute(
-        __import__("sqlalchemy", fromlist=["text"]).text("""
+        text("""
             INSERT INTO job_runs (id, job_id, worker_id, attempt_number, status, started_at)
             VALUES (:id, :job_id, :worker_id, :attempt, :status, NOW())
         """),
@@ -78,6 +83,30 @@ async def execute_job(db: AsyncSession, job: dict, worker_id: str) -> None:
         },
     )
     await db.commit()
+
+    # ── Log the claim/scheduling decision ─────────────────────────────────
+    # Written after commit so the log row is visible even if execution fails.
+    try:
+        async with __import__("app.core.database", fromlist=["get_db_session"]).get_db_session() as log_db:
+            log_id = str(uuid.uuid4())
+            await log_db.execute(
+                text(
+                    "INSERT INTO job_logs (id, job_id, run_id, level, message, logged_at) "
+                    "VALUES (:id, :job_id, :run_id, 'info', :msg, NOW())"
+                ),
+                {
+                    "id": log_id,
+                    "job_id": job_id,
+                    "run_id": run_id,
+                    "msg": (
+                        f"Claimed under '{scheduling_policy}' policy by "
+                        f"worker '{worker_id}' (type: {worker_type}), "
+                        f"attempt {attempts_made}/{max_attempts}"
+                    ),
+                },
+            )
+    except Exception:
+        logger.warning("job_id=%s Could not write claim log entry.", job_id)
 
     await broadcast("job_status_changed", {"job_id": job_id, "status": JOB_STATUS_RUNNING})
 
@@ -103,7 +132,7 @@ async def execute_job(db: AsyncSession, job: dict, worker_id: str) -> None:
 
     # ── Update the JobRun row ──────────────────────────────────────────────
     await db.execute(
-        __import__("sqlalchemy", fromlist=["text"]).text("""
+        text("""
             UPDATE job_runs
             SET status=:status, finished_at=NOW(), duration_ms=:dur, error_message=:err
             WHERE id=:run_id
@@ -126,8 +155,6 @@ async def _handle_success(
     cron_expression: str | None,
 ) -> None:
     """Mark the job completed and, for recurring jobs, schedule the next run."""
-    from sqlalchemy import text
-
     await db.execute(
         text("UPDATE jobs SET status='completed' WHERE id=:jid"),
         {"jid": job_id},
@@ -150,8 +177,6 @@ async def _schedule_next_cron_run(
     Each cron run is a new row — the old row is never mutated — so every
     execution has its own complete history in job_runs and job_logs.
     """
-    from sqlalchemy import text
-
     # Load original job config to copy into the new row
     result = await db.execute(
         text("SELECT job_type, payload, priority, max_attempts FROM jobs WHERE id=:jid"),
@@ -170,6 +195,10 @@ async def _schedule_next_cron_run(
         return
 
     new_id = str(uuid.uuid4())
+    payload = row["payload"]
+    if not isinstance(payload, str):
+        payload = json.dumps(payload)
+
     await db.execute(
         text("""
             INSERT INTO jobs
@@ -183,7 +212,7 @@ async def _schedule_next_cron_run(
             "id": new_id,
             "qid": queue_id,
             "jtype": row["job_type"],
-            "payload": __import__("json").dumps(row["payload"]),
+            "payload": payload,
             "priority": row["priority"],
             "max_att": row["max_attempts"],
             "run_at": next_run,
@@ -203,8 +232,6 @@ async def _handle_failure(
     job: dict,
 ) -> None:
     """Re-queue with backoff or promote to DLQ when attempts are exhausted."""
-    from sqlalchemy import text
-
     if attempts_made < max_attempts:
         # Load queue retry config
         result = await db.execute(
@@ -251,3 +278,8 @@ async def _handle_failure(
         )
         await broadcast("job_status_changed", {"job_id": job_id, "status": JOB_STATUS_DEAD})
         logger.warning("job_id=%s exhausted %d attempts → DLQ.", job_id, attempts_made)
+
+        # Trigger AI summary generation asynchronously (Phase 10.5)
+        import asyncio
+        from app.ai_summary import generate_and_save_ai_summary
+        asyncio.create_task(generate_and_save_ai_summary(job_id, queue_id))

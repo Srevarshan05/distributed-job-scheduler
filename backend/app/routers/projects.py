@@ -60,6 +60,7 @@ async def create_project(
 
     project = Project(org_id=org_id, name=body.name, slug=body.slug, description=body.description)
     db.add(project)
+    await db.flush()
     return project
 
 
@@ -179,8 +180,11 @@ async def create_queue(
         retry_limit=body.retry_limit,
         retry_strategy=body.retry_strategy,
         retry_delay_seconds=body.retry_delay_seconds,
+        required_worker_type=body.required_worker_type,
+        scheduling_policy=body.scheduling_policy,
     )
     db.add(queue)
+    await db.flush()
     return queue
 
 

@@ -11,6 +11,11 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 # Import all models so autogenerate sees them
 from app.models import *  # noqa: F401, F403

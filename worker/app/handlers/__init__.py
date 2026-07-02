@@ -41,5 +41,7 @@ def get_handler(job_type: str) -> JobHandler | None:
 
 # ── Import built-in handlers so they self-register on module load ──────────────
 from app.handlers.builtin import register_builtin_handlers  # noqa: E402
+from app.handlers.compute_heavy import handle_cpu_burn  # noqa: E402
 
 register_builtin_handlers()
+register_handler("cpu_burn", handle_cpu_burn)

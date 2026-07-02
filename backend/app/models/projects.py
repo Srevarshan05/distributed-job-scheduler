@@ -106,6 +106,22 @@ class Queue(Base):
     )  # 'fixed' | 'linear' | 'exponential'
     retry_delay_seconds: Mapped[int] = mapped_column(Integer, default=60, nullable=False)
 
+    # ── Worker routing (Phase 9.1) ────────────────────────────────────────────
+    # Workers only claim from queues whose required_worker_type matches their own
+    # worker_type. This is enforced atomically inside the claim query.
+    required_worker_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="standard"
+    )
+
+    # ── Scheduling policy (Phase 9.2) ─────────────────────────────────────────
+    # 'fifo'       — claim strictly by created_at ASC, ignore priority
+    # 'priority'   — priority DESC, created_at ASC (default)
+    # 'fair_share' — at the worker level, rotate across eligible queues so no
+    #                single queue starves the others
+    scheduling_policy: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="priority"
+    )
+
     # ── State ────────────────────────────────────────────────────────────────
     is_paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

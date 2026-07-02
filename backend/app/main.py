@@ -11,9 +11,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.errors import AppError, app_error_handler, unhandled_error_handler
 from app.routers.auth import router as auth_router
+from app.routers.health import router as health_router
 from app.routers.jobs import dlq_router, router as jobs_router
+from app.routers.log_export import router as log_export_router
 from app.routers.organizations import router as orgs_router
 from app.routers.projects import router as projects_router
+from app.routers.workers import router as workers_router
 
 app = FastAPI(
     title="Distributed Job Scheduler — API",
@@ -45,6 +48,9 @@ app.include_router(orgs_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
 app.include_router(jobs_router, prefix="/api/v1")
 app.include_router(dlq_router, prefix="/api/v1")
+app.include_router(workers_router, prefix="/api/v1")
+app.include_router(log_export_router, prefix="/api/v1")
+app.include_router(health_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["health"])

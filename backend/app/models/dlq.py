@@ -56,6 +56,12 @@ class DeadLetterEntry(Base):
         UUID(as_uuid=True), nullable=True
     )  # the new job row created on retry
 
+    # AI Failure Summary (Phase 10.5)
+    ai_failure_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_summary_generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     job: Mapped["Job"] = relationship("Job")  # noqa: F821
 
     def __repr__(self) -> str:

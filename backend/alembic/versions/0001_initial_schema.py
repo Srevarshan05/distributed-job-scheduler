@@ -167,7 +167,7 @@ def upgrade() -> None:
     op.create_table(
         "worker_heartbeats",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
-        sa.Column("worker_id", sa.String(255), nullable=False),
+        sa.Column("worker_id", sa.String(255), sa.ForeignKey("workers.worker_id", ondelete="CASCADE"), nullable=False),
         sa.Column("pinged_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
     op.create_index("ix_worker_heartbeats_worker_id", "worker_heartbeats", ["worker_id"])

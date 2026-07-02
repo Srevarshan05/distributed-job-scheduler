@@ -72,26 +72,87 @@ async def seed() -> None:
         db.add(project)
         await db.flush()
 
-        # Queue
+        # Queue (Default)
         queue = Queue(
             project_id=project.id,
             name="Default Queue",
             slug=SEED_QUEUE_SLUG,
-            description="Default queue for testing.",
+            description="Default queue for standard tasks.",
             max_workers=3,
             retry_limit=3,
             retry_strategy="exponential",
             retry_delay_seconds=30,
+            required_worker_type="standard",
+            scheduling_policy="priority",
         )
         db.add(queue)
+        await db.flush()
+
+        # Queue (High Compute)
+        high_compute_queue = Queue(
+            project_id=project.id,
+            name="High Compute Queue",
+            slug="high-compute",
+            description="Queue for resource-heavy computing tasks.",
+            max_workers=2,
+            retry_limit=2,
+            retry_strategy="exponential",
+            retry_delay_seconds=60,
+            required_worker_type="high_compute",
+            scheduling_policy="priority",
+        )
+        db.add(high_compute_queue)
+        await db.flush()
+
+        # Seed Jobs
+        from app.models.jobs import Job
+
+        # Standard Jobs
+        job1 = Job(
+            queue_id=queue.id,
+            job_type="send_email",
+            payload={"to": "user1@example.com", "subject": "Welcome to Codity!"},
+            priority=10,
+            max_attempts=3,
+            created_by_user_id=user.id,
+        )
+        job2 = Job(
+            queue_id=queue.id,
+            job_type="send_email",
+            payload={"to": "user2@example.com", "subject": "Monthly Digest"},
+            priority=50,
+            max_attempts=3,
+            created_by_user_id=user.id,
+        )
+
+        # High Compute Jobs
+        job3 = Job(
+            queue_id=high_compute_queue.id,
+            job_type="cpu_burn",
+            payload={"iterations": 10000},
+            priority=20,
+            max_attempts=3,
+            created_by_user_id=user.id,
+        )
+        job4 = Job(
+            queue_id=high_compute_queue.id,
+            job_type="cpu_burn",
+            payload={"iterations": 30000},
+            priority=80,
+            max_attempts=3,
+            created_by_user_id=user.id,
+        )
+
+        db.add_all([job1, job2, job3, job4])
         await db.commit()
 
-        print("\n── Seed complete ───────────────────────────────")
-        print(f"  User:     {SEED_EMAIL} / {SEED_PASSWORD}")
-        print(f"  Org slug: {SEED_ORG_SLUG}  (id: {org.id})")
-        print(f"  Project:  {SEED_PROJECT_SLUG}  (id: {project.id})")
-        print(f"  Queue:    {SEED_QUEUE_SLUG}  (id: {queue.id})")
-        print("────────────────────────────────────────────────\n")
+        print("\n== Seed complete ===============================")
+        print(f"  User:         {SEED_EMAIL} / {SEED_PASSWORD}")
+        print(f"  Org slug:     {SEED_ORG_SLUG}  (id: {org.id})")
+        print(f"  Project:      {SEED_PROJECT_SLUG}  (id: {project.id})")
+        print(f"  Default Q:    {SEED_QUEUE_SLUG}  (id: {queue.id})")
+        print(f"  High Comp Q:  high-compute  (id: {high_compute_queue.id})")
+        print("================================================\n")
 
     await engine.dispose()
 
