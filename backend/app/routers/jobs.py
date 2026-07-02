@@ -1,0 +1,288 @@
+"""
+backend/app/routers/jobs.py
+
+Job creation (single + batch), listing, detail, cancel, and DLQ retry.
+All routes require authentication and membership in the owning org.
+"""
+import uuid
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
+
+from app.core.database import get_db
+from app.core.deps import get_current_user
+from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
+from app.models.dlq import DeadLetterEntry
+from app.models.jobs import (
+    JOB_STATUS_CANCELLED,
+    JOB_STATUS_DEAD,
+    JOB_STATUS_QUEUED,
+    JOB_STATUS_RUNNING,
+    JOB_STATUS_SCHEDULED,
+    Job,
+)
+from app.models.organizations import OrgMember
+from app.models.projects import Queue
+from app.models.users import User
+from app.schemas.jobs import (
+    DLQEntryResponse,
+    JobBatchCreateRequest,
+    JobCancelResponse,
+    JobCreateRequest,
+    JobDetailResponse,
+    JobResponse,
+    JobRetryResponse,
+)
+from app.schemas.pagination import PaginatedResponse, PaginationParams
+
+router = APIRouter(prefix="/queues/{queue_id}", tags=["jobs"])
+dlq_router = APIRouter(prefix="/dlq", tags=["dead-letter-queue"])
+
+
+async def _resolve_queue_and_check_access(
+    queue_id: uuid.UUID,
+    user: User,
+    db: AsyncSession,
+) -> Queue:
+    """Load the queue and confirm the caller's org membership.
+
+    Raises NotFoundError if the queue doesn't exist; ForbiddenError if
+    the user doesn't belong to the org that owns this queue.
+    """
+    result = await db.execute(
+        select(Queue)
+        .where(Queue.id == queue_id, Queue.is_active == True)  # noqa: E712
+    )
+    queue = result.scalar_one_or_none()
+    if queue is None:
+        raise NotFoundError("Queue", str(queue_id))
+
+    # Verify org membership via the project → org chain
+    from app.models.projects import Project
+
+    project_result = await db.execute(select(Project).where(Project.id == queue.project_id))
+    project = project_result.scalar_one_or_none()
+    if project is None:
+        raise NotFoundError("Project", str(queue.project_id))
+
+    membership = await db.execute(
+        select(OrgMember).where(OrgMember.org_id == project.org_id, OrgMember.user_id == user.id)
+    )
+    if membership.scalar_one_or_none() is None:
+        raise ForbiddenError("You do not have access to this queue.")
+
+    return queue
+
+
+def _build_job(queue_id: uuid.UUID, body: JobCreateRequest, user_id: uuid.UUID) -> Job:
+    """Construct a Job ORM object from a create request.
+
+    Sets initial status to 'scheduled' when run_at is in the future,
+    otherwise 'queued' for immediate dispatch.
+    """
+    now = datetime.now(timezone.utc)
+    run_at = body.run_at or now
+    status = JOB_STATUS_SCHEDULED if run_at > now else JOB_STATUS_QUEUED
+
+    return Job(
+        queue_id=queue_id,
+        job_type=body.job_type,
+        payload=body.payload,
+        priority=body.priority,
+        run_at=run_at,
+        cron_expression=body.cron_expression,
+        max_attempts=body.max_attempts,
+        status=status,
+        created_by_user_id=user_id,
+    )
+
+
+@router.post("/jobs", response_model=JobResponse, status_code=201)
+async def create_job(
+    queue_id: uuid.UUID,
+    body: JobCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Job:
+    """Submit one job to the queue."""
+    await _resolve_queue_and_check_access(queue_id, current_user, db)
+    job = _build_job(queue_id, body, current_user.id)
+    db.add(job)
+    return job
+
+
+@router.post("/jobs/batch", response_model=list[JobResponse], status_code=201)
+async def create_jobs_batch(
+    queue_id: uuid.UUID,
+    body: JobBatchCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[Job]:
+    """Submit multiple jobs in a single transaction. All succeed or none do."""
+    await _resolve_queue_and_check_access(queue_id, current_user, db)
+    jobs = [_build_job(queue_id, req, current_user.id) for req in body.jobs]
+    db.add_all(jobs)
+    return jobs
+
+
+@router.get("/jobs", response_model=PaginatedResponse[JobResponse])
+async def list_jobs(
+    queue_id: uuid.UUID,
+    status: str | None = Query(default=None),
+    job_type: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PaginatedResponse[JobResponse]:
+    """List jobs in a queue with optional status/type filters."""
+    await _resolve_queue_and_check_access(queue_id, current_user, db)
+    params = PaginationParams(page=page, page_size=page_size)
+
+    query = select(Job).where(Job.queue_id == queue_id)
+    if status:
+        query = query.where(Job.status == status)
+    if job_type:
+        query = query.where(Job.job_type == job_type)
+
+    result = await db.execute(query.order_by(Job.created_at.desc()))
+    all_jobs = result.scalars().all()
+    paginated = all_jobs[params.offset : params.offset + params.page_size]
+    return PaginatedResponse.build(
+        items=[JobResponse.model_validate(j) for j in paginated],
+        total=len(all_jobs),
+        params=params,
+    )
+
+
+@router.get("/jobs/{job_id}", response_model=JobDetailResponse)
+async def get_job(
+    queue_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Job:
+    """Get full job detail including run history and logs."""
+    await _resolve_queue_and_check_access(queue_id, current_user, db)
+    result = await db.execute(
+        select(Job)
+        .where(Job.id == job_id, Job.queue_id == queue_id)
+        .options(selectinload(Job.runs), selectinload(Job.logs))
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise NotFoundError("Job", str(job_id))
+    return job
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobCancelResponse)
+async def cancel_job(
+    queue_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Cancel a job that is still queued or scheduled.
+
+    Jobs in 'running' status cannot be safely cancelled without the worker's
+    cooperation — that is deliberately out of scope. See design_decisions.md.
+    """
+    await _resolve_queue_and_check_access(queue_id, current_user, db)
+    result = await db.execute(
+        select(Job).where(Job.id == job_id, Job.queue_id == queue_id)
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise NotFoundError("Job", str(job_id))
+
+    if job.status == JOB_STATUS_RUNNING:
+        raise ValidationError(
+            "Cannot cancel a running job. "
+            "Stop the owning worker or wait for it to finish."
+        )
+    if job.status not in (JOB_STATUS_QUEUED, JOB_STATUS_SCHEDULED):
+        raise ValidationError(f"Job is already in terminal state '{job.status}'.")
+
+    job.status = JOB_STATUS_CANCELLED
+    return {"job_id": job.id, "message": "Job cancelled."}
+
+
+# ── Dead-letter queue ─────────────────────────────────────────────────────────
+
+@dlq_router.get("/queues/{queue_id}/dlq", response_model=PaginatedResponse[DLQEntryResponse])
+async def list_dlq(
+    queue_id: uuid.UUID,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> PaginatedResponse[DLQEntryResponse]:
+    """List dead-letter entries for a queue."""
+    await _resolve_queue_and_check_access(queue_id, current_user, db)
+    params = PaginationParams(page=page, page_size=page_size)
+
+    result = await db.execute(
+        select(DeadLetterEntry)
+        .where(DeadLetterEntry.queue_id == queue_id)
+        .order_by(DeadLetterEntry.promoted_at.desc())
+    )
+    all_entries = result.scalars().all()
+    paginated = all_entries[params.offset : params.offset + params.page_size]
+    return PaginatedResponse.build(
+        items=[DLQEntryResponse.model_validate(e) for e in paginated],
+        total=len(all_entries),
+        params=params,
+    )
+
+
+@dlq_router.post("/dlq/{dlq_id}/retry", response_model=JobRetryResponse)
+async def retry_dlq_entry(
+    dlq_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Manually retry a dead job by creating a fresh job row with attempts_made=0.
+
+    The original DLQ entry is updated with who triggered the retry and when.
+    The original job row remains as `dead` for full traceability.
+    """
+    entry_result = await db.execute(
+        select(DeadLetterEntry).where(DeadLetterEntry.id == dlq_id)
+    )
+    entry = entry_result.scalar_one_or_none()
+    if entry is None:
+        raise NotFoundError("DLQ entry", str(dlq_id))
+
+    if entry.retry_job_id is not None:
+        raise ConflictError("This DLQ entry has already been retried.")
+
+    # Load original job to copy its config
+    job_result = await db.execute(select(Job).where(Job.id == entry.job_id))
+    original_job = job_result.scalar_one_or_none()
+    if original_job is None:
+        raise NotFoundError("Job", str(entry.job_id))
+
+    new_job = Job(
+        queue_id=original_job.queue_id,
+        job_type=original_job.job_type,
+        payload=original_job.payload,
+        priority=original_job.priority,
+        max_attempts=original_job.max_attempts,
+        status=JOB_STATUS_QUEUED,
+        created_by_user_id=current_user.id,
+    )
+    db.add(new_job)
+    await db.flush()
+
+    entry.retried_at = datetime.now(timezone.utc)
+    entry.retried_by_user_id = current_user.id
+    entry.retry_job_id = new_job.id
+
+    return {
+        "original_job_id": original_job.id,
+        "new_job_id": new_job.id,
+        "message": "Job re-queued successfully.",
+    }
