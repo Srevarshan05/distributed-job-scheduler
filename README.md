@@ -155,16 +155,13 @@ Follow these 4 simple steps:
 
 ### Option B: Run Database in Docker + Apps Locally (Hybrid)
 
-Use this setup if you want to make fast code changes locally without rebuilding Docker images. We provide automated startup scripts that configure the environments, spin up the database container, run migrations/seeding, and launch all services concurrently.
+Use this setup if you want to make fast code changes locally without rebuilding Docker images. We provide automated click-and-run scripts that configure the environments, spin up the database container, run migrations/seeding, and launch all services concurrently.
 
-#### The Quick Way: Use the Startup Scripts
+#### The Quick Way: Double-Click and Run
 
 * **Windows:**
-  Right-click `start.ps1` and choose **Run with PowerShell**, or run in your terminal:
-  ```powershell
-  .\start.ps1
-  ```
-  *(This script checks your Python/Node/Docker tools, prompts you if Docker Desktop is closed, starts the DB container, configures the `.venv`, runs migrations, and opens three new terminal windows running the backend, worker, and frontend dev server automatically.)*
+  Simply **double-click the `start.bat`** file in your file explorer.
+  *(This starts a Command prompt that runs `start.ps1` with the correct bypass policy. It checks your Python/Node/Docker tools, alerts you if Docker Desktop is closed, starts the database container, sets up your virtual environment, runs migrations, and spawns the backend, worker, and frontend dev servers automatically.)*
 
 * **macOS / Linux:**
   Give execution permissions and run:
