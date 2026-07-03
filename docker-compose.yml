@@ -2,13 +2,13 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:-jobrunr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-jobrunr_password}
+      POSTGRES_DB: ${POSTGRES_DB:-jobrunr}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jobrunr} -d ${POSTGRES_DB:-jobrunr}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -21,13 +21,13 @@ services:
       dockerfile: backend/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobrunr}:${POSTGRES_PASSWORD:-jobrunr_password}@db:5432/${POSTGRES_DB:-jobrunr}
     depends_on:
       db:
         condition: service_healthy
     ports:
       - "8000:8000"
-    restart: unless-stopped
+    restart: on-failure
 
   worker-standard:
     build:
@@ -35,7 +35,7 @@ services:
       dockerfile: worker/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobrunr}:${POSTGRES_PASSWORD:-jobrunr_password}@db:5432/${POSTGRES_DB:-jobrunr}
       WORKER_ID: standard-1
       WORKER_TYPE: standard
     depends_on:
@@ -51,7 +51,7 @@ services:
       dockerfile: worker/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-jobrunr}:${POSTGRES_PASSWORD:-jobrunr_password}@db:5432/${POSTGRES_DB:-jobrunr}
       WORKER_ID: high-1
       WORKER_TYPE: high_compute
     depends_on:

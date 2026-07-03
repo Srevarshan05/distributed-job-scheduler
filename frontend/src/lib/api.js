@@ -4,7 +4,11 @@
 // In local dev: set VITE_API_URL=http://localhost:8000/api/v1 in frontend/.env.local
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
-const WS_BASE  = import.meta.env.VITE_WS_URL  || 'ws://localhost:8001/ws';
+// In Docker nginx proxies /ws → worker-standard:8001. Derive from window.location so it always
+// works regardless of protocol (ws vs wss) and host.
+const _wsProto = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+const _wsHost  = typeof window !== 'undefined' ? window.location.host : 'localhost:5173';
+const WS_BASE  = import.meta.env.VITE_WS_URL  || `${_wsProto}://${_wsHost}/ws`;
 
 // ── Token management ──────────────────────────────────────
 let _token = localStorage.getItem('access_token') || null;
