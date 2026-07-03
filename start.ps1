@@ -16,7 +16,7 @@ Write-Host ""
 
 # A. Check Python
 try {
-    $pythonVer = & python --version 2>&1
+    $pythonVer = python --version 2>&1
     Write-Host "✔ Python found: $pythonVer" -ForegroundColor Green
 } catch {
     Write-Host "✖ Python is not installed or not in PATH." -ForegroundColor Red
@@ -27,8 +27,8 @@ try {
 
 # B. Check Node.js & npm
 try {
-    $nodeVer = & node --version 2>&1
-    $npmVer = & npm --version 2>&1
+    $nodeVer = node --version 2>&1
+    $npmVer = npm --version 2>&1
     Write-Host "✔ Node.js found: $nodeVer" -ForegroundColor Green
     Write-Host "✔ npm found: v$npmVer" -ForegroundColor Green
 } catch {
@@ -40,7 +40,7 @@ try {
 
 # C. Check Docker
 try {
-    $dockerVer = & docker --version 2>&1
+    $dockerVer = docker --version 2>&1
     Write-Host "✔ Docker found: $dockerVer" -ForegroundColor Green
 } catch {
     Write-Host "✖ Docker is not installed or not in PATH." -ForegroundColor Red
@@ -52,8 +52,9 @@ try {
 # D. Check if Docker Daemon is running
 Write-Host "Checking if Docker service is running..." -ForegroundColor Gray
 while ($true) {
-    & docker info >$null 2>&1
-    if ($LASTEXITCODE -eq 0) {
+    # Call docker info and suppress output
+    $null = docker info 2>&1
+    if ($?) {
         Write-Host "✔ Docker Daemon is active and running." -ForegroundColor Green
         break
     }
@@ -83,7 +84,7 @@ if (-not (Test-Path ".env")) {
 
 if (-not (Test-Path ".venv")) {
     Write-Host "Creating Python virtual environment (.venv)..." -ForegroundColor Yellow
-    & python -m venv .venv
+    python -m venv .venv
     Write-Host "✔ Virtual environment created." -ForegroundColor Green
 } else {
     Write-Host "✔ Virtual environment (.venv) already exists." -ForegroundColor Green
@@ -101,7 +102,7 @@ Write-Host "✔ Python packages installed successfully." -ForegroundColor Green
 if (-not (Test-Path "frontend/node_modules")) {
     Write-Host "Installing frontend dependencies (npm install)..." -ForegroundColor Yellow
     Set-Location frontend
-    & npm install
+    npm install
     Set-Location ..
     Write-Host "✔ Frontend packages installed." -ForegroundColor Green
 } else {
@@ -113,7 +114,7 @@ if (-not (Test-Path "frontend/node_modules")) {
 # ─────────────────────────────────────────────────────────────────────────────
 
 Write-Host "Starting PostgreSQL database in Docker..." -ForegroundColor Yellow
-& docker compose up db -d
+docker compose up db -d
 Write-Host "✔ Database container started." -ForegroundColor Green
 
 Write-Host "Waiting 5 seconds for PostgreSQL database to initialize..." -ForegroundColor Gray
