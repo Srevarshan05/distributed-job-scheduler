@@ -7,21 +7,23 @@ All cryptographic constants come from config — no literals here.
 from datetime import datetime, timedelta, timezone
 
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 
 from app.core.config import get_settings
-
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(plaintext: str) -> str:
     """Return the bcrypt hash of `plaintext`."""
-    return _pwd_context.hash(plaintext)
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(plaintext.encode("utf-8"), salt).decode("utf-8")
 
 
 def verify_password(plaintext: str, hashed: str) -> bool:
     """Return True if `plaintext` matches `hashed`, False otherwise."""
-    return _pwd_context.verify(plaintext, hashed)
+    try:
+        return bcrypt.checkpw(plaintext.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
 
 def create_access_token(subject: str) -> str:

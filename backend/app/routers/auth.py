@@ -72,10 +72,21 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> dict:
     Raises 401 for unknown email or wrong password — same message either way
     to avoid leaking which emails are registered.
     """
+    import logging
+    logger = logging.getLogger("app.auth")
+    logger.info(f"Login attempt for email: {body.email}")
+
     result = await db.execute(select(User).where(User.email == body.email, User.is_active == True))  # noqa: E712
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(body.password, user.hashed_password):
+    if user is None:
+        logger.warning(f"User not found for email: {body.email}")
+        raise UnauthorizedError("Invalid email or password.")
+
+    is_verified = verify_password(body.password, user.hashed_password)
+    logger.info(f"Password verification result for {body.email}: {is_verified}")
+
+    if not is_verified:
         raise UnauthorizedError("Invalid email or password.")
 
     token = create_access_token(subject=str(user.id))
