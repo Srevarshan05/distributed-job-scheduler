@@ -155,16 +155,42 @@ Follow these 4 simple steps:
 
 ### Option B: Run Database in Docker + Apps Locally (Hybrid)
 
-Use this setup if you want to make fast code changes locally without rebuilding Docker images.
+Use this setup if you want to make fast code changes locally without rebuilding Docker images. We provide automated startup scripts that configure the environments, spin up the database container, run migrations/seeding, and launch all services concurrently.
 
-#### 1. Start the Database Container
+#### The Quick Way: Use the Startup Scripts
+
+* **Windows:**
+  Right-click `start.ps1` and choose **Run with PowerShell**, or run in your terminal:
+  ```powershell
+  .\start.ps1
+  ```
+  *(This script checks your Python/Node/Docker tools, prompts you if Docker Desktop is closed, starts the DB container, configures the `.venv`, runs migrations, and opens three new terminal windows running the backend, worker, and frontend dev server automatically.)*
+
+* **macOS / Linux:**
+  Give execution permissions and run:
+  ```bash
+  chmod +x start.sh
+  ./start.sh
+  ```
+  *(This script verifies your local tools, runs the database container, installs packages, runs migrations, and uses `npx concurrently` to run all three services in a single terminal window with colored logs. Press `Ctrl+C` to stop all services at once.)*
+
+* Access the Web Dashboard at **[http://localhost:5173](http://localhost:5173)**.
+* Login with: **`admin@example.com` / `password123`**.
+
+---
+
+#### The Manual Way: Step-by-Step Commands
+
+If you prefer to configure everything manually, run these steps in order:
+
+##### 1. Start the Database Container
 We use Docker to run the database so you don't need to install PostgreSQL on your machine:
 ```bash
 docker compose up db -d
 ```
-*(This starts PostgreSQL on port `5433` of your local machine. The data is saved to a named volume `pgdata`.)*
+*(This starts PostgreSQL on port `5433` of your local machine. The database data is saved to a named volume `pgdata`.)*
 
-#### 2. Configure Environment variables
+##### 2. Configure Environment variables
 Copy the environment template:
 * **Windows CMD:** `copy .env.example .env`
 * **Windows PowerShell:** `Copy-Item .env.example .env`
@@ -172,7 +198,7 @@ Copy the environment template:
 
 *(By default, the `.env` is already configured to connect to port `5433` on your localhost.)*
 
-#### 3. Setup and Run the Backend API
+##### 3. Setup and Run the Backend API
 In a new terminal:
 ```bash
 # 1. Create a Python virtual environment
@@ -194,7 +220,7 @@ python ../scripts/seed.py
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-#### 4. Run the Worker Nodes
+##### 4. Run the Worker Nodes
 In **two separate terminals** (make sure virtual environment is active in both):
 
 * **Terminal 1 (Standard Worker):**
@@ -222,15 +248,13 @@ In **two separate terminals** (make sure virtual environment is active in both):
   # WORKER_ID=high-1 WORKER_TYPE=high_compute uvicorn app.main:app --host 127.0.0.1 --port 8002 --reload
   ```
 
-#### 5. Run the Frontend Dashboard
+##### 5. Run the Frontend Dashboard
 In a new terminal:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-* Access the Web Dashboard at **[http://localhost:5173](http://localhost:5173)**.
-* Login with: **`admin@example.com` / `password123`**.
 
 ---
 
