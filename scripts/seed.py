@@ -14,8 +14,12 @@ import asyncio
 import sys
 import os
 
-# Allow importing backend app modules from the script
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
+# Allow importing backend app modules from the script (both local and docker paths)
+_parent_dir = os.path.join(os.path.dirname(__file__), "..")
+_backend_dir = os.path.join(_parent_dir, "backend")
+sys.path.insert(0, _parent_dir)
+if os.path.exists(_backend_dir):
+    sys.path.insert(0, _backend_dir)
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy import text
