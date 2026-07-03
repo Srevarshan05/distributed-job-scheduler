@@ -1,10 +1,19 @@
-FROM python:3.12-slim
-
+FROM python:3.11-slim AS base
 WORKDIR /app
 
-COPY requirements.txt .
+# Install dependencies first (separate layer — rebuild only when requirements change)
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Copy application code
+COPY backend/ .
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Copy seed script (lives outside backend/ in the repo)
+COPY scripts/seed.py /app/scripts/seed.py
+
+# Copy and make entrypoint executable
+COPY backend/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8000
+ENTRYPOINT ["/entrypoint.sh"]

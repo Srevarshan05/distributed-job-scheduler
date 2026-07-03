@@ -6,9 +6,12 @@ FastAPI application factory for the API server (port 8000).
 Registers all routers, global exception handlers, and CORS middleware.
 Nothing else lives here — this file's only job is to assemble the app.
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
+from app.core.database import engine
 from app.core.errors import AppError, app_error_handler, unhandled_error_handler
 from app.routers.auth import router as auth_router
 from app.routers.health import router as health_router
@@ -18,6 +21,16 @@ from app.routers.organizations import router as orgs_router
 from app.routers.projects import router as projects_router
 from app.routers.workers import router as workers_router
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Ensure idempotency_key column exists
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_idempotency_key ON jobs(idempotency_key);"))
+    yield
+
+
 app = FastAPI(
     title="Distributed Job Scheduler — API",
     description=(
@@ -25,7 +38,34 @@ app = FastAPI(
         "See /docs for interactive documentation."
     ),
     version="1.0.0",
+    lifespan=lifespan,
 )
+
+import time
+import uuid
+import contextvars
+import logging
+
+logger = logging.getLogger("app.api")
+correlation_id_ctx = contextvars.ContextVar("correlation_id", default=None)
+
+@app.middleware("http")
+async def add_correlation_id_and_log(request, call_next):
+    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
+    correlation_id_ctx.set(correlation_id)
+    
+    start_time = time.monotonic()
+    response = await call_next(request)
+    process_time = (time.monotonic() - start_time) * 1000
+    
+    response.headers["X-Correlation-ID"] = correlation_id
+    response.headers["X-Response-Time-Ms"] = f"{process_time:.2f}"
+    
+    logger.info(
+        "request_method=%s request_path=%s status_code=%d latency_ms=%.2f correlation_id=%s",
+        request.method, request.url.path, response.status_code, process_time, correlation_id
+    )
+    return response
 
 # ── CORS ──────────────────────────────────────────────────────────────────────
 # Allow the Vite dev server and any localhost origin during development.

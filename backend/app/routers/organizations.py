@@ -13,6 +13,7 @@ from sqlalchemy.future import select
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError
+from app.core.resilience import retry_on_db_lock
 from app.core.security import hash_password
 from app.models.organizations import OrgMember, Organization
 from app.models.users import User
@@ -47,6 +48,7 @@ async def _require_org_member(
 
 
 @router.post("", response_model=OrgResponse, status_code=201)
+@retry_on_db_lock()
 async def create_org(
     body: OrgCreateRequest,
     db: AsyncSession = Depends(get_db),
@@ -190,6 +192,7 @@ async def list_members(
 
 
 @router.post("/{org_id}/members", response_model=OrgMemberDetailResponse, status_code=201)
+@retry_on_db_lock()
 async def create_member(
     org_id: uuid.UUID,
     body: MemberCreateRequest,

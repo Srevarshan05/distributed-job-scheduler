@@ -81,3 +81,15 @@ class QueueResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── Project Stats ──────────────────────────────────────────────────────────────
+
+class ProjectStatsResponse(BaseModel):
+    """Aggregated live stats for a project — used by both the folder card
+    and the project detail header so the same endpoint serves both views."""
+    queue_count: int
+    jobs_queued: int
+    jobs_running: int
+    jobs_completed_today: int
+    jobs_dead: int

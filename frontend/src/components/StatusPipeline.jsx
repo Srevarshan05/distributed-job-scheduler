@@ -4,12 +4,12 @@
 // Completed steps are filled green, active = orange, failed = red, pending = grey outline.
 
 const STEPS = [
-  { key: 'queued',    icon: '●', title: 'Queued' },
+  { key: 'queued',    icon: <img src="/line.png" style={{ width: '12px', height: '12px', objectFit: 'contain' }} alt="" />, title: 'Queued' },
   { key: 'scheduled', icon: '⏰', title: 'Scheduled' },
-  { key: 'running',   icon: '▶', title: 'Running' },
-  { key: 'completed', icon: '✓', title: 'Completed' },
-  { key: 'failed',    icon: '✕', title: 'Failed' },
-  { key: 'dead',      icon: '☠', title: 'Dead' },
+  { key: 'running',   icon: <img src="/running.png" style={{ width: '12px', height: '12px', objectFit: 'contain' }} alt="" />, title: 'Running' },
+  { key: 'completed', icon: <img src="/checked.png" style={{ width: '12px', height: '12px', objectFit: 'contain' }} alt="" />, title: 'Completed' },
+  { key: 'failed',    icon: <img src="/delete.png" style={{ width: '12px', height: '12px', objectFit: 'contain' }} alt="" />, title: 'Failed' },
+  { key: 'dead',      icon: <img src="/human-skull.png" style={{ width: '12px', height: '12px', objectFit: 'contain' }} alt="" />, title: 'Dead' },
 ];
 
 // Map current status to which steps are "done" vs "active" vs "failed" vs "pending"

@@ -167,3 +167,49 @@ async def system_health(
         workers=workers,
         queues=queues,
     )
+
+
+# ── Throughput Visualization ──────────────────────────────────────────────────
+
+class ThroughputPoint(BaseModel):
+    timestamp: str  # e.g., "10:15", "10:20"
+    completed_count: int
+
+
+class ThroughputResponse(BaseModel):
+    points: list[ThroughputPoint]
+
+
+@router.get("/throughput", response_model=ThroughputResponse)
+async def system_throughput(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ThroughputResponse:
+    """Return historical job completion counts bucketed in 5-minute windows for the last hour.
+
+    Provides real-time data for the dashboard line chart to visualize throughput.
+    """
+    now = datetime.now(timezone.utc)
+    buckets = []
+    for i in range(12):
+        start = now - timedelta(minutes=(12 - i) * 5)
+        # Round down to nearest 5 mins
+        start = start.replace(minute=(start.minute // 5) * 5, second=0, microsecond=0)
+        end = start + timedelta(minutes=5)
+        buckets.append((start, end))
+
+    points = []
+    for start, end in buckets:
+        res = await db.execute(
+            text(
+                "SELECT COUNT(*) FROM jobs "
+                "WHERE status = 'completed' AND updated_at >= :start AND updated_at < :end"
+            ),
+            {"start": start, "end": end}
+        )
+        count = res.scalar_one() or 0
+        label = start.strftime("%H:%M")
+        points.append(ThroughputPoint(timestamp=label, completed_count=count))
+
+    return ThroughputResponse(points=points)
+

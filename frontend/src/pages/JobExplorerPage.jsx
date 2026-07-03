@@ -13,12 +13,12 @@ import Breadcrumb from '../components/Breadcrumb';
 import EmptyState from '../components/EmptyState';
 
 const STATUS_TABS = [
-  { key: '', label: 'All', icon: '⊞' },
-  { key: 'queued', label: 'Queued', icon: '●' },
-  { key: 'running', label: 'Running', icon: '▶' },
-  { key: 'completed', label: 'Completed', icon: '✓' },
-  { key: 'failed', label: 'Failed', icon: '✕' },
-  { key: 'dead', label: 'Dead', icon: '☠' },
+  { key: '', label: 'All', icon: <span style={{ marginRight: 6 }}>⊞</span> },
+  { key: 'queued', label: 'Queued', icon: <img src="/line.png" style={{ width: 14, height: 14, marginRight: 6, objectFit: 'contain', verticalAlign: 'middle' }} alt="" /> },
+  { key: 'running', label: 'Running', icon: <img src="/running.png" style={{ width: 14, height: 14, marginRight: 6, objectFit: 'contain', verticalAlign: 'middle' }} alt="" /> },
+  { key: 'completed', label: 'Completed', icon: <img src="/checked.png" style={{ width: 14, height: 14, marginRight: 6, objectFit: 'contain', verticalAlign: 'middle' }} alt="" /> },
+  { key: 'failed', label: 'Failed', icon: <img src="/delete.png" style={{ width: 14, height: 14, marginRight: 6, objectFit: 'contain', verticalAlign: 'middle' }} alt="" /> },
+  { key: 'dead', label: 'Dead', icon: <img src="/human-skull.png" style={{ width: 14, height: 14, marginRight: 6, objectFit: 'contain', verticalAlign: 'middle' }} alt="" /> },
 ];
 
 const BUILTIN_TYPES = ['send_email', 'sleep', 'random_fail', 'always_fail'];
@@ -31,6 +31,7 @@ function fmt(dt) {
 export default function JobExplorerPage() {
   const navigate = useNavigate();
   const [allQueues, setAllQueues] = useState([]);
+  const [allProjects, setAllProjects] = useState([]);  // Phase 12.6 — for project column
   const [allJobs, setAllJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedQueue, setSelectedQueue] = useState('');
@@ -39,8 +40,9 @@ export default function JobExplorerPage() {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(null);
 
-  // Job creation modal state
+  // Job creation modal state — Phase 12.7: project-first picker
   const [showCreate, setShowCreate] = useState(false);
+  const [formProject, setFormProject] = useState('');   // NEW: which project is selected first
   const [formQueue, setFormQueue] = useState('');
   const [formType, setFormType] = useState('send_email');
   const [formPriority, setFormPriority] = useState(0);
@@ -86,13 +88,16 @@ export default function JobExplorerPage() {
       const org = orgList.items[0];
       setUserRole(org.role || 'member_read_only');
       const projList = await projects.list(org.id);
+      const projItems = projList.items || [];
+      setAllProjects(projItems);  // Phase 12.6
       const qs = [];
-      for (const proj of projList.items || []) {
+      for (const proj of projItems) {
         const qList = await queues.list(org.id, proj.id);
-        qs.push(...(qList.items || []).map(q => ({ ...q, orgId: org.id, projectId: proj.id })));
+        qs.push(...(qList.items || []).map(q => ({ ...q, orgId: org.id, projectId: proj.id, projectName: proj.name })));
       }
       setAllQueues(qs);
       if (qs.length > 0 && !formQueue) {
+        setFormProject(projItems[0]?.id || '');
         setFormQueue(qs[0].id);
       }
 
@@ -246,7 +251,7 @@ export default function JobExplorerPage() {
         <div className="table-container">
           <div className="table-toolbar">
             <div className="table-toolbar-title">
-              RECIPIENT ATTRIBUTION LOG
+              Worker Live Status
             </div>
             <div style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)' }}>
               ✦ Click row to inspect timeline drawer. Use buttons to simulate action events.
@@ -266,7 +271,8 @@ export default function JobExplorerPage() {
               <thead>
                 <tr>
                   <th>JOB TYPE</th>
-                  <th>QUEUE</th>
+                  <th>PROJECT › QUEUE</th>
+                  <th>SUBMITTED BY</th>
                   <th>STATUS PIPELINE</th>
                   <th>SELECTION REASON</th>
                   <th style={{ textAlign: 'right' }}>ATTEMPTS</th>
@@ -281,7 +287,39 @@ export default function JobExplorerPage() {
                       <div className="td-mono mt-1">{job.id?.slice(0, 8)}…</div>
                     </td>
                     <td style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-xs)' }}>
-                      {queueMap[job.queue_id]?.name || '—'}
+                      {(() => {
+                        const q = queueMap[job.queue_id];
+                        return (
+                          <div>
+                            {q?.projectName && (
+                              <div style={{ fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 2 }}>
+                                {q.projectName}
+                              </div>
+                            )}
+                            <div style={{ color: 'var(--color-text-secondary)' }}>{q?.name || '—'}</div>
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 22, height: 22, borderRadius: '50%',
+                          background: 'var(--color-border-light)', fontSize: 10, fontWeight: 700,
+                          color: 'var(--color-text-secondary)', flexShrink: 0
+                        }}>
+                          {(job.created_by_email || 'S')[0].toUpperCase()}
+                        </span>
+                        <div>
+                          <div style={{ fontSize: 'var(--font-xs)', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                            {job.created_by_email || 'system'}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--color-text-muted)' }}>
+                            {new Date(job.created_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td>
                       <StatusPipeline status={job.status} compact />
@@ -346,24 +384,52 @@ export default function JobExplorerPage() {
                 </div>
               )}
               
-              {/* Destination Group */}
+              {/* Destination Group — Phase 12.7: project-first picker */}
               <div>
                 <h4 style={{ borderBottom: '1px solid var(--color-border)', paddingBottom: 6, marginBottom: 12, fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--color-text-primary)' }}>Routing & Task Action</h4>
                 <div style={formRowStyle}>
+                  {/* Step 1: Pick project */}
                   <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>Destination Queue</label>
-                    <select className="filter-select" value={formQueue} onChange={e => setFormQueue(e.target.value)} required style={{ width: '100%' }}>
-                      <option value="">-- Select Queue --</option>
-                      {allQueues.map(q => (
-                        <option key={q.id} value={q.id}>{q.name} ({q.required_worker_type === 'high_compute' ? 'High Compute' : 'Standard'})</option>
+                    <label style={labelStyle}>① Project</label>
+                    <select
+                      className="filter-select"
+                      value={formProject}
+                      onChange={e => {
+                        setFormProject(e.target.value);
+                        // Auto-select first queue of that project
+                        const firstQ = allQueues.find(q => q.projectId === e.target.value);
+                        setFormQueue(firstQ?.id || '');
+                      }}
+                      required
+                      style={{ width: '100%' }}
+                    >
+                      <option value="">-- Select Project --</option>
+                      {allProjects.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
                     <span style={{ fontSize: 11, color: 'var(--color-text-muted)', display: 'block', marginTop: 4 }}>
-                      Select the queue that will receive and process this background task.
+                      Choose which project this job belongs to.
                     </span>
                   </div>
+                  {/* Step 2: Queue filtered by project */}
                   <div style={{ flex: 1 }}>
-                    <label style={labelStyle}>Task Action (Job Type)</label>
+                    <label style={labelStyle}>② Destination Queue</label>
+                    <select className="filter-select" value={formQueue} onChange={e => setFormQueue(e.target.value)} required style={{ width: '100%' }}>
+                      <option value="">-- Select Queue --</option>
+                      {allQueues
+                        .filter(q => !formProject || q.projectId === formProject)
+                        .map(q => (
+                          <option key={q.id} value={q.id}>{q.name} ({q.required_worker_type === 'high_compute' ? 'High Compute' : 'Standard'})</option>
+                        ))}
+                    </select>
+                    <span style={{ fontSize: 11, color: 'var(--color-text-muted)', display: 'block', marginTop: 4 }}>
+                      Only queues in the selected project are shown.
+                    </span>
+                  </div>
+                  {/* Task type */}
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>③ Task Action (Job Type)</label>
                     <select className="filter-select" value={formType} onChange={e => setFormType(e.target.value)} required style={{ width: '100%' }}>
                       <option value="send_email">📧 Send Email Notification</option>
                       <option value="sleep">⏱ Simulate Idle Delay</option>

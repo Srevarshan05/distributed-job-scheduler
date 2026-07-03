@@ -77,6 +77,21 @@ export default function JobDrawer({ queueId, jobId, onClose }) {
                       ['Claimed At',   fmt(job.claimed_at)],
                       ['Created',      fmt(job.created_at)],
                       ['Cron',         job.cron_expression || '—'],
+                      ['Submitted By', (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            width: 20, height: 20, borderRadius: '50%',
+                            background: 'var(--color-border)', fontSize: 10, fontWeight: 700,
+                            color: 'var(--color-text-secondary)', flexShrink: 0
+                          }}>
+                            {(job.created_by_email || 'S')[0].toUpperCase()}
+                          </span>
+                          <span style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>
+                            {job.created_by_email || 'system'}
+                          </span>
+                        </div>
+                      )],
                     ].map(([label, val]) => (
                       <tr key={label} style={{ borderBottom: '1px solid var(--color-border-light)' }}>
                         <td style={{ padding: '6px 0', color: 'var(--color-text-muted)', width: 110, fontSize: 'var(--font-xs)', fontWeight: 600, textTransform: 'uppercase' }}>{label}</td>

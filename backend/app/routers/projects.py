@@ -5,14 +5,24 @@ CRUD for projects and queues, scoped under an organization.
 All routes require the caller to be a member of the target org.
 """
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError
+from app.models.jobs import (
+    JOB_STATUS_DEAD,
+    JOB_STATUS_QUEUED,
+    JOB_STATUS_RUNNING,
+    JOB_STATUS_SCHEDULED,
+    JOB_STATUS_COMPLETED,
+    Job,
+)
 from app.models.organizations import OrgMember
 from app.models.projects import Project, Queue
 from app.models.users import User
@@ -20,6 +30,7 @@ from app.schemas.pagination import PaginatedResponse, PaginationParams
 from app.schemas.projects import (
     ProjectCreateRequest,
     ProjectResponse,
+    ProjectStatsResponse,
     ProjectUpdateRequest,
     QueueCreateRequest,
     QueueResponse,
@@ -103,6 +114,78 @@ async def get_project(
     if project is None:
         raise NotFoundError("Project", str(project_id))
     return project
+
+
+@router.get("/projects/{project_id}/stats", response_model=ProjectStatsResponse)
+async def get_project_stats(
+    org_id: uuid.UUID,
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ProjectStatsResponse:
+    """Aggregate live stats for a project in one round-trip.
+
+    Used by both the project folder card and the project detail header.
+    All counts are computed from real DB rows — no cached or invented values.
+    """
+    await _require_member(org_id, current_user, db)
+
+    # Verify project exists and belongs to org
+    proj_result = await db.execute(
+        select(Project).where(
+            Project.id == project_id,
+            Project.org_id == org_id,
+            Project.is_active == True,  # noqa: E712
+        )
+    )
+    if proj_result.scalar_one_or_none() is None:
+        raise NotFoundError("Project", str(project_id))
+
+    # ── Queue count ───────────────────────────────────────────────────────────
+    q_count_res = await db.execute(
+        select(func.count()).select_from(Queue).where(
+            Queue.project_id == project_id,
+            Queue.is_active == True,  # noqa: E712
+        )
+    )
+    queue_count = q_count_res.scalar_one() or 0
+
+    # Subquery: all queue IDs in this project
+    queue_ids_subq = (
+        select(Queue.id)
+        .where(Queue.project_id == project_id, Queue.is_active == True)  # noqa: E712
+        .scalar_subquery()
+    )
+
+    async def _count_jobs(statuses: list[str], extra_filter=None):
+        q = select(func.count()).select_from(Job).where(
+            Job.queue_id.in_(queue_ids_subq),
+            Job.status.in_(statuses),
+        )
+        if extra_filter is not None:
+            q = q.where(extra_filter)
+        res = await db.execute(q)
+        return res.scalar_one() or 0
+
+    # Midnight UTC for "today" cutoff
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    jobs_queued = await _count_jobs([JOB_STATUS_QUEUED, JOB_STATUS_SCHEDULED])
+    jobs_running = await _count_jobs([JOB_STATUS_RUNNING])
+    jobs_completed_today = await _count_jobs(
+        [JOB_STATUS_COMPLETED],
+        extra_filter=(Job.updated_at >= today_start),
+    )
+    jobs_dead = await _count_jobs([JOB_STATUS_DEAD])
+
+    return ProjectStatsResponse(
+        queue_count=queue_count,
+        jobs_queued=jobs_queued,
+        jobs_running=jobs_running,
+        jobs_completed_today=jobs_completed_today,
+        jobs_dead=jobs_dead,
+    )
 
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)

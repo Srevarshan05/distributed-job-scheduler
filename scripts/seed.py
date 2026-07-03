@@ -1,11 +1,12 @@
 """
 scripts/seed.py
 
-Creates one test user, one organization, one project, and one queue.
+Creates one test user, one organization, one project, and two queues.
 Run this after the Alembic migration on a fresh database.
 
 Usage (from the repo root with venv active):
-    python scripts/seed.py
+    python scripts/seed.py              # always seeds (fails if already seeded)
+    python scripts/seed.py --if-empty  # safe to call on every restart; skips if data exists
 
 The test credentials are printed to stdout — never commit real secrets.
 """
@@ -17,9 +18,13 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend"))
 
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy import text
 from dotenv import load_dotenv
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "backend", ".env"))
+# Load backend .env when running locally; in Docker DATABASE_URL is injected via environment
+_env_path = os.path.join(os.path.dirname(__file__), "..", "backend", ".env")
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 
@@ -32,19 +37,27 @@ SEED_PROJECT_SLUG = "seed-project"
 SEED_QUEUE_SLUG = "default"
 
 
+async def already_seeded(engine) -> bool:
+    """Return True if the seed admin user already exists — used by --if-empty."""
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text("SELECT 1 FROM users WHERE email = :email LIMIT 1"),
+            {"email": SEED_EMAIL},
+        )
+        return result.first() is not None
+
+
 async def seed() -> None:
     from app.core.security import hash_password
     from app.models.users import User
     from app.models.organizations import Organization, OrgMember
     from app.models.projects import Project, Queue
-    from app.core.database import Base
+    from app.models.jobs import Job
 
-    engine = create_async_engine(DATABASE_URL, echo=True)
+    engine = create_async_engine(DATABASE_URL, echo=False)
     SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
     async with SessionLocal() as db:
-        import uuid
-
         # User
         user = User(
             email=SEED_EMAIL,
@@ -72,7 +85,7 @@ async def seed() -> None:
         db.add(project)
         await db.flush()
 
-        # Queue (Default)
+        # Queue — Standard
         queue = Queue(
             project_id=project.id,
             name="Default Queue",
@@ -88,7 +101,7 @@ async def seed() -> None:
         db.add(queue)
         await db.flush()
 
-        # Queue (High Compute)
+        # Queue — High Compute
         high_compute_queue = Queue(
             project_id=project.id,
             name="High Compute Queue",
@@ -105,9 +118,6 @@ async def seed() -> None:
         await db.flush()
 
         # Seed Jobs
-        from app.models.jobs import Job
-
-        # Standard Jobs
         job1 = Job(
             queue_id=queue.id,
             job_type="send_email",
@@ -124,8 +134,6 @@ async def seed() -> None:
             max_attempts=3,
             created_by_user_id=user.id,
         )
-
-        # High Compute Jobs
         job3 = Job(
             queue_id=high_compute_queue.id,
             job_type="cpu_burn",
@@ -157,5 +165,18 @@ async def seed() -> None:
     await engine.dispose()
 
 
+async def main() -> None:
+    if_empty = "--if-empty" in sys.argv
+    engine = create_async_engine(DATABASE_URL, echo=False)
+
+    if if_empty and await already_seeded(engine):
+        print("==> Seed skipped: database already contains seed data.")
+        await engine.dispose()
+        return
+
+    await engine.dispose()
+    await seed()
+
+
 if __name__ == "__main__":
-    asyncio.run(seed())
+    asyncio.run(main())

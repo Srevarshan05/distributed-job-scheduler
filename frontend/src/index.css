@@ -405,26 +405,27 @@ input, select, textarea { font-family: inherit; }
 
 .pipeline-step.done {
   border-color: #09090b;
-  background: #09090b;
-  color: #ffffff;
+  background: #ffffff;
+  color: #09090b;
 }
 
 .pipeline-step.active {
   border-color: #09090b;
-  background: var(--color-border-light);
+  background: #ffffff;
   color: #09090b;
 }
 
 .pipeline-step.failed {
-  border-color: #a1a1aa;
-  background: var(--color-bg);
-  color: #71717a;
+  border-color: #ef4444;
+  background: #ffffff;
+  color: #ef4444;
 }
 
 .pipeline-step.pending {
   border-color: var(--color-border);
-  background: var(--color-surface);
+  background: #ffffff;
   color: var(--color-text-muted);
+  opacity: 0.45;
 }
 
 .pipeline-arrow {

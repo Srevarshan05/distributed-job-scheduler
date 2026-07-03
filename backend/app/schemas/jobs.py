@@ -20,6 +20,7 @@ class JobCreateRequest(BaseModel):
     run_at: datetime | None = None          # None → run immediately
     cron_expression: str | None = None      # set for recurring jobs
     max_attempts: int = Field(default=3, ge=1, le=50)
+    idempotency_key: str | None = Field(default=None, max_length=255)
 
 
 class JobBatchCreateRequest(BaseModel):
@@ -66,6 +67,9 @@ class JobResponse(BaseModel):
     claimed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # Audit: who submitted / assigned this job (populated from session)
+    created_by_email: str | None = None
+    idempotency_key: str | None = None
 
     model_config = {"from_attributes": True}
 

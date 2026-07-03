@@ -38,6 +38,8 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.resilience import retry_on_db_lock
+
 logger = logging.getLogger("worker.claim")
 
 # ── Per-policy claim queries ──────────────────────────────────────────────────
@@ -93,6 +95,7 @@ _CLAIM_QUERY_FIFO = text("""
 """)
 
 
+@retry_on_db_lock()
 async def claim_next_job(
     db: AsyncSession,
     queue_id: uuid.UUID,
@@ -104,19 +107,40 @@ async def claim_next_job(
 
     Returns the claimed job row as a dict, or None if no eligible job exists.
 
-    `worker_type` filters by `queues.required_worker_type` inside the
-    subquery — the routing decision is part of the atomic claim, not a
-    pre-check that could be invalidated by a race.
-
-    `scheduling_policy` selects the ORDER BY strategy:
-    - 'priority'  / 'fair_share' → priority DESC, created_at ASC
-    - 'fifo'                     → created_at ASC only
+    Enforces the queue's `max_workers` concurrency limit:
+    1. Locks the queue row (FOR UPDATE) to serialize claims on this specific queue.
+    2. Counts currently active jobs (status in 'claimed', 'running') for the queue.
+    3. If active count >= max_workers, skips claiming.
+    4. Otherwise, executes the SELECT...FOR UPDATE SKIP LOCKED update claim.
     """
+    # ── 1. Lock the queue row and get max_workers ─────────────────────────────
+    q_res = await db.execute(
+        text("SELECT max_workers FROM queues WHERE id = :queue_id AND is_active = TRUE FOR UPDATE"),
+        {"queue_id": str(queue_id)}
+    )
+    q_row = q_res.fetchone()
+    if q_row is None:
+        return None
+    max_workers = q_row[0]
+
+    # ── 2. Count currently active jobs (claimed + running) ────────────────────
+    active_res = await db.execute(
+        text("SELECT COUNT(*) FROM jobs WHERE queue_id = :queue_id AND status IN ('claimed', 'running')"),
+        {"queue_id": str(queue_id)}
+    )
+    active_count = active_res.scalar_one() or 0
+
+    if active_count >= max_workers:
+        logger.info(
+            "Queue %s has reached its concurrency limit (%d/%d active). Skipping claim.",
+            queue_id, active_count, max_workers
+        )
+        return None
+
+    # ── 3. Proceed to claim ───────────────────────────────────────────────────
     if scheduling_policy == "fifo":
         query = _CLAIM_QUERY_FIFO
     else:
-        # 'priority' and 'fair_share' both use priority ordering per-job;
-        # fair_share's rotation across queues is handled in poller.py
         query = _CLAIM_QUERY_PRIORITY
 
     result = await db.execute(

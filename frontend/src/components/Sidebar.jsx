@@ -1,16 +1,15 @@
 import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { auth } from '../lib/api';
-import queueLogo from '../assets/queue.png';
 
 const NAV = [
-  { to: '/',          icon: '⊞', label: 'Dashboard' },
-  { to: '/jobs',      icon: '◈', label: 'Job Explorer' },
-  { to: '/queues',    icon: <img src={queueLogo} alt="" style={{ width: 14, height: 14, objectFit: 'contain', filter: 'brightness(0)' }} />, label: 'Queues' },
-  { to: '/workers',   icon: '⚙', label: 'Workers' },
-  { to: '/dlq',       icon: '☠', label: 'Dead Letter Queue' },
+  { to: '/',          icon: '⊞',  label: 'Dashboard' },
+  { to: '/projects',  icon: '📁', label: 'Projects' },
+  { to: '/jobs',      icon: '◈',  label: 'Job Explorer' },
+  { to: '/workers',   icon: '⚙',  label: 'Workers' },
+  { to: '/dlq',       icon: '☠',  label: 'Dead Letter Queue' },
   { to: '/admin',     icon: '🛡', label: 'Admin (Roles)' },
-  { to: '/settings',  icon: '⚙', label: 'Settings' },
+  { to: '/settings',  icon: '⚙',  label: 'Settings' },
 ];
 
 export default function Sidebar() {

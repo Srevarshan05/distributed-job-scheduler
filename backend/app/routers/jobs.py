@@ -16,6 +16,7 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.errors import ConflictError, ForbiddenError, NotFoundError, ValidationError
+from app.core.resilience import retry_on_db_lock
 from app.models.dlq import DeadLetterEntry
 from app.models.jobs import (
     JOB_STATUS_CANCELLED,
@@ -96,40 +97,89 @@ def _build_job(queue_id: uuid.UUID, body: JobCreateRequest, user_id: uuid.UUID) 
         max_attempts=body.max_attempts,
         status=status,
         created_by_user_id=user_id,
+        idempotency_key=body.idempotency_key,
     )
 
 
 @router.post("/jobs", response_model=JobResponse, status_code=201)
+@retry_on_db_lock()
 async def create_job(
     queue_id: uuid.UUID,
     body: JobCreateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> Job:
-    """Submit one job to the queue."""
+) -> JobResponse:
+    """Submit one job to the queue.
+
+    If an optional idempotency_key is provided and a job with the same key
+    already exists in the queue, we return the existing job (idempotent response).
+    """
     await _resolve_queue_and_check_access(queue_id, current_user, db)
+
+    # Idempotency safety: check if job with key already exists
+    if body.idempotency_key:
+        existing = await db.execute(
+            select(Job).where(Job.queue_id == queue_id, Job.idempotency_key == body.idempotency_key)
+        )
+        existing_job = existing.scalar_one_or_none()
+        if existing_job:
+            resp = JobResponse.model_validate(existing_job)
+            if existing_job.created_by_user_id == current_user.id:
+                resp.created_by_email = current_user.email
+            else:
+                user_res = await db.execute(select(User.email).where(User.id == existing_job.created_by_user_id))
+                resp.created_by_email = user_res.scalar() or "system"
+            return resp
+
     job = _build_job(queue_id, body, current_user.id)
     db.add(job)
     await db.flush()
     await db.refresh(job)
-    return job
+    resp = JobResponse.model_validate(job)
+    resp.created_by_email = current_user.email
+    return resp
 
 
 @router.post("/jobs/batch", response_model=list[JobResponse], status_code=201)
+@retry_on_db_lock()
 async def create_jobs_batch(
     queue_id: uuid.UUID,
     body: JobBatchCreateRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> list[Job]:
-    """Submit multiple jobs in a single transaction. All succeed or none do."""
+) -> list[JobResponse]:
+    """Submit multiple jobs in a single transaction. All succeed or none do.
+
+    For each job, if an idempotency_key is provided and it already exists,
+    the existing job is returned instead of creating a duplicate.
+    """
     await _resolve_queue_and_check_access(queue_id, current_user, db)
-    jobs = [_build_job(queue_id, req, current_user.id) for req in body.jobs]
-    db.add_all(jobs)
-    await db.flush()
-    for j in jobs:
-        await db.refresh(j)
-    return jobs
+    results = []
+    for req in body.jobs:
+        if req.idempotency_key:
+            existing = await db.execute(
+                select(Job).where(Job.queue_id == queue_id, Job.idempotency_key == req.idempotency_key)
+            )
+            existing_job = existing.scalar_one_or_none()
+            if existing_job:
+                resp = JobResponse.model_validate(existing_job)
+                if existing_job.created_by_user_id == current_user.id:
+                    resp.created_by_email = current_user.email
+                else:
+                    user_res = await db.execute(select(User.email).where(User.id == existing_job.created_by_user_id))
+                    resp.created_by_email = user_res.scalar() or "system"
+                results.append(resp)
+                continue
+
+        job = _build_job(queue_id, req, current_user.id)
+        db.add(job)
+        await db.flush()
+        await db.refresh(job)
+        resp = JobResponse.model_validate(job)
+        resp.created_by_email = current_user.email
+        results.append(resp)
+
+    return results
 
 
 @router.get("/jobs", response_model=PaginatedResponse[JobResponse])
@@ -142,7 +192,11 @@ async def list_jobs(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> PaginatedResponse[JobResponse]:
-    """List jobs in a queue with optional status/type filters."""
+    """List jobs in a queue with optional status/type filters.
+
+    Resolves creator email addresses in a single batched query (no N+1)
+    and attaches them to each JobResponse for attribution display.
+    """
     await _resolve_queue_and_check_access(queue_id, current_user, db)
     params = PaginationParams(page=page, page_size=page_size)
 
@@ -155,8 +209,26 @@ async def list_jobs(
     result = await db.execute(query.order_by(Job.created_at.desc()))
     all_jobs = result.scalars().all()
     paginated = all_jobs[params.offset : params.offset + params.page_size]
+
+    # ── Batch-resolve creator emails (single query, no N+1) ───────────────
+    creator_ids = {
+        j.created_by_user_id for j in paginated if j.created_by_user_id is not None
+    }
+    email_map: dict[uuid.UUID, str] = {}
+    if creator_ids:
+        user_rows = await db.execute(
+            select(User.id, User.email).where(User.id.in_(creator_ids))
+        )
+        email_map = {row.id: row.email for row in user_rows}
+
+    items = []
+    for j in paginated:
+        resp = JobResponse.model_validate(j)
+        resp.created_by_email = email_map.get(j.created_by_user_id, "system")
+        items.append(resp)
+
     return PaginatedResponse.build(
-        items=[JobResponse.model_validate(j) for j in paginated],
+        items=items,
         total=len(all_jobs),
         params=params,
     )
@@ -271,6 +343,7 @@ async def get_job(
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobCancelResponse)
+@retry_on_db_lock()
 async def cancel_job(
     queue_id: uuid.UUID,
     job_id: uuid.UUID,
@@ -340,6 +413,7 @@ async def list_dlq(
 
 
 @dlq_router.post("/dlq/{dlq_id}/retry", response_model=JobRetryResponse)
+@retry_on_db_lock()
 async def retry_dlq_entry(
     dlq_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),

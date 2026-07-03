@@ -11,6 +11,21 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const handleNavScroll = (id) => {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = "https://unpkg.com/@lottiefiles/dotlottie-wc@0.9.14/dist/dotlottie-wc.js";
+    script.type = "module";
+    document.body.appendChild(script);
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
+
   // --- Animation States ---
   const [simMode, setSimMode] = useState('success'); // 'success', 'failure'
   const [simStep, setSimStep] = useState(0); // 0 to 5 for the horizontal step cards
@@ -954,10 +969,8 @@ export default function LoginPage() {
             
             {exportState === 'idle' && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, color: '#71717a' }}>
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ marginBottom: 12 }}>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /><polyline points="10 9 9 9 8 9" />
-                </svg>
-                <span style={{ fontSize: 13 }}>Click Export on the left to compile report.</span>
+                <dotlottie-wc src="https://lottie.host/dc817b73-a86b-47f2-9f0a-ec6a415fabfc/6YPOQGxhh2.lottie" style={{ width: '300px', height: '300px' }} autoplay="true" loop="true"></dotlottie-wc>
+                <span style={{ fontSize: 13, marginTop: 12 }}>Click Export on the left to compile report.</span>
               </div>
             )}
 

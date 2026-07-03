@@ -75,6 +75,76 @@ const renderSparkline = (data, label, maxVal = 100, unit = '%') => {
   );
 };
 
+
+const renderThroughputChart = (points) => {
+  if (!points || points.length === 0) return null;
+  const width = 360;
+  const height = 120;
+  const maxVal = Math.max(...points.map(p => p.completed_count), 5); // scale to at least 5
+
+  const coords = points.map((p, idx) => {
+    const x = (idx / (points.length - 1)) * (width - 40) + 20;
+    const y = height - (p.completed_count / maxVal) * (height - 35) - 20;
+    return { x, y, val: p.completed_count, label: p.timestamp };
+  });
+
+  const linePoints = coords.map(c => `${c.x},${c.y}`).join(' ');
+  const areaPoints = `20,${height - 20} ${linePoints} ${width - 20},${height - 20}`;
+
+  return (
+    <div className="card" style={{ marginTop: 'var(--space-5)', width: '100%' }}>
+      <div className="card-title" style={{ marginBottom: 'var(--space-3)' }}>
+        System Job Throughput
+      </div>
+      <div style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)', marginBottom: 'var(--space-4)' }}>
+        Completed background jobs per 5-minute bucket (last 60 mins).
+      </div>
+      <div style={{ background: '#fafafa', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', padding: '16px 8px 8px 8px', overflow: 'hidden' }}>
+        <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} style={{ display: 'block', overflow: 'visible' }}>
+          {/* Grid lines */}
+          <line x1="20" y1={height / 2} x2={width - 20} y2={height / 2} stroke="#e4e4e7" strokeDasharray="3,3" />
+          <line x1="20" y1={height - 20} x2={width - 20} y2={height - 20} stroke="#e4e4e7" />
+
+          {/* Area Fill */}
+          <polygon
+            points={areaPoints}
+            fill="rgba(9, 9, 11, 0.05)"
+          />
+          {/* Outline Line */}
+          <polyline
+            points={linePoints}
+            fill="none"
+            stroke="#09090b"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+
+          {/* Data Points */}
+          {coords.map((c, i) => (
+            <g key={i}>
+              <circle cx={c.x} cy={c.y} r="3.5" fill="#09090b" stroke="#ffffff" strokeWidth="1" />
+              {c.val > 0 && (
+                <text x={c.x} y={c.y - 7} textAnchor="middle" fontSize="9" fontWeight="800" fill="#09090b" style={{ fontFamily: 'var(--font-mono)' }}>
+                  {c.val}
+                </text>
+              )}
+            </g>
+          ))}
+
+          {/* Axis Labels */}
+          {coords.filter((_, i) => i % 3 === 0 || i === coords.length - 1).map((c, i) => (
+            <text key={i} x={c.x} y={height - 4} textAnchor="middle" fontSize="8" fill="var(--color-text-muted)" style={{ fontFamily: 'var(--font-mono)' }}>
+              {c.label}
+            </text>
+          ))}
+        </svg>
+      </div>
+    </div>
+  );
+};
+
+
 export default function DashboardPage() {
   const [allJobs, setAllJobs] = useState([]);
   const [stats, setStats] = useState({});
@@ -84,6 +154,7 @@ export default function DashboardPage() {
   const [orgId, setOrgId] = useState(null);
   const [queueMap, setQueueMap] = useState({});
   const [systemHealth, setSystemHealth] = useState(null);
+  const [throughputPoints, setThroughputPoints] = useState([]);  // Phase 13
   const [dlqEntries, setDlqEntries] = useState([]);
   const [telemetryHistory, setTelemetryHistory] = useState({});
 
@@ -99,6 +170,8 @@ export default function DashboardPage() {
           )
         );
         computeStats();
+        // Also refresh throughput on state change so the chart updates live
+        loadHealth();
         if (msg.data.status === 'dead') {
           loadData();
         }
@@ -168,6 +241,10 @@ export default function DashboardPage() {
     try {
       const h = await health.system();
       setSystemHealth(h);
+      
+      // Load historical throughput data for visual dashboard trend chart
+      health.throughput().then(res => setThroughputPoints(res.points || [])).catch(() => {});
+
       if (h?.workers) {
         setTelemetryHistory(prev => {
           const next = { ...prev };
@@ -498,6 +575,9 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
+
+            {/* Throughput Line Chart — Phase 13 */}
+            {renderThroughputChart(throughputPoints)}
           </div>
         </div>
       </div>
