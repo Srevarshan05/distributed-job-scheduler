@@ -136,11 +136,12 @@ Follow these 4 simple steps:
    * **Windows PowerShell:** `Copy-Item .env.example .env`
    * **macOS / Linux:** `cp .env.example .env`
 
-2. **Start the containers:**
+2. **Start the containers (with clean builds):**
    ```bash
-   docker compose up --build
+   docker compose down -v
+   docker compose up --build --force-recreate
    ```
-   *Wait 1-2 minutes for the database to configure and start.*
+   *(Note: Using `--build --force-recreate` ensures Docker does not use stale cached layers, and compiles your latest front-end and back-end updates directly into the container images.)*
 
 3. **Access the application:**
    * **Web Dashboard:** [http://localhost:5173](http://localhost:5173) (Log in with `admin@example.com` / `password123`)
