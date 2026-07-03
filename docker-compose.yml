@@ -13,7 +13,7 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "5432:5432"   # exposed for optional local DB client debugging only
+      - "5433:5432"   # mapped to 5433 to avoid conflicts with local native Postgres
 
   backend:
     build:
