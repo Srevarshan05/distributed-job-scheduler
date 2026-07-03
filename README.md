@@ -119,57 +119,118 @@ Organization → Project → Queue → Job
 
 ---
 
-## Running without Docker (local development)
+## ⚙️ Setup Options
 
-### Prerequisites
-- Python 3.11+
-- Node.js 20+
-- PostgreSQL 16 running locally
+You have two choices to run the application on your computer:
+* **Option A (Easiest):** Run the entire stack inside Docker (frontend, backend, workers, and database).
+* **Option B (For Development):** Run the database in Docker, and run the FastAPI backend, workers, and React frontend natively on your machine.
 
-### Backend
+---
 
+### Option A: Run Everything in Docker
+
+Follow these 4 simple steps:
+
+1. **Copy the environment file:**
+   * **Windows CMD:** `copy .env.example .env`
+   * **Windows PowerShell:** `Copy-Item .env.example .env`
+   * **macOS / Linux:** `cp .env.example .env`
+
+2. **Start the containers:**
+   ```bash
+   docker compose up --build
+   ```
+   *Wait 1-2 minutes for the database to configure and start.*
+
+3. **Access the application:**
+   * **Web Dashboard:** [http://localhost:5173](http://localhost:5173) (Log in with `admin@example.com` / `password123`)
+   * **API Swagger Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+4. **Wipe database & clean up:**
+   ```bash
+   docker compose down -v
+   ```
+
+---
+
+### Option B: Run Database in Docker + Apps Locally (Hybrid)
+
+Use this setup if you want to make fast code changes locally without rebuilding Docker images.
+
+#### 1. Start the Database Container
+We use Docker to run the database so you don't need to install PostgreSQL on your machine:
 ```bash
-cd distributed-job-scheduler
+docker compose up db -d
+```
+*(This starts PostgreSQL on port `5433` of your local machine. The data is saved to a named volume `pgdata`.)*
+
+#### 2. Configure Environment variables
+Copy the environment template:
+* **Windows CMD:** `copy .env.example .env`
+* **Windows PowerShell:** `Copy-Item .env.example .env`
+* **macOS / Linux:** `cp .env.example .env`
+
+*(By default, the `.env` is already configured to connect to port `5433` on your localhost.)*
+
+#### 3. Setup and Run the Backend API
+In a new terminal:
+```bash
+# 1. Create a Python virtual environment
 python -m venv .venv
-.venv\Scripts\activate          # Windows
+
+# 2. Activate the virtual environment
+.venv\Scripts\activate          # Windows PowerShell/CMD
 # source .venv/bin/activate    # macOS/Linux
 
+# 3. Install requirements
 pip install -r backend/requirements.txt
 
-# Set up env
-cp backend/.env.example backend/.env
-# Edit backend/.env: set DATABASE_URL to your local Postgres
-
-# Run migrations + seed
+# 4. Run migrations & seed data
 cd backend
 alembic upgrade head
-cd ..
-python scripts/seed.py
+python ../scripts/seed.py
 
-# Start API server
-cd backend
+# 5. Start backend server
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-### Workers (two terminals)
+#### 4. Run the Worker Nodes
+In **two separate terminals** (make sure virtual environment is active in both):
 
-```bash
-# Terminal 1 — Standard worker
-cd worker
-WORKER_ID=standard-1 WORKER_TYPE=standard uvicorn app.main:app --host 127.0.0.1 --port 8001
+* **Terminal 1 (Standard Worker):**
+  ```bash
+  cd worker
+  pip install -r requirements.txt
+  # Set worker configuration and run
+  # Windows Cmd:
+  set WORKER_ID=standard-1
+  set WORKER_TYPE=standard
+  uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+  # macOS/Linux/PowerShell:
+  # WORKER_ID=standard-1 WORKER_TYPE=standard uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+  ```
 
-# Terminal 2 — High-compute worker
-cd worker
-WORKER_ID=high-1 WORKER_TYPE=high_compute uvicorn app.main:app --host 127.0.0.1 --port 8002
-```
+* **Terminal 2 (High-Compute Worker):**
+  ```bash
+  cd worker
+  # Set worker configuration and run
+  # Windows Cmd:
+  set WORKER_ID=high-1
+  set WORKER_TYPE=high_compute
+  uvicorn app.main:app --host 127.0.0.1 --port 8002 --reload
+  # macOS/Linux/PowerShell:
+  # WORKER_ID=high-1 WORKER_TYPE=high_compute uvicorn app.main:app --host 127.0.0.1 --port 8002 --reload
+  ```
 
-### Frontend
-
+#### 5. Run the Frontend Dashboard
+In a new terminal:
 ```bash
 cd frontend
 npm install
-npm run dev   # http://localhost:5173
+npm run dev
 ```
+* Access the Web Dashboard at **[http://localhost:5173](http://localhost:5173)**.
+* Login with: **`admin@example.com` / `password123`**.
 
 ---
 
@@ -181,7 +242,7 @@ Full interactive docs at http://localhost:8000/docs (Swagger UI) or http://local
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/v1/auth/register` | Register new user |
+| `POST` | `/api/v1/auth/signup` | Register new user |
 | `POST` | `/api/v1/auth/login` | Get JWT token |
 | `GET` | `/api/v1/orgs` | List organizations |
 | `GET` | `/api/v1/orgs/{id}/projects` | List projects in org |
