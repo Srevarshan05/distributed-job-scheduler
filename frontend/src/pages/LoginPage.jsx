@@ -5,9 +5,11 @@ import { auth } from '../lib/api';
 export default function LoginPage() {
   const navigate = useNavigate();
   const [isSignUpActive, setIsSignUpActive] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
+  const [signInEmail, setSignInEmail] = useState('');
+  const [signInPassword, setSignInPassword] = useState('');
+  const [signUpEmail, setSignUpEmail] = useState('');
+  const [signUpPassword, setSignUpPassword] = useState('');
+  const [signUpName, setSignUpName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -188,7 +190,7 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await auth.login(email, password);
+      await auth.login(signInEmail, signInPassword);
       navigate('/');
     } catch (err) {
       setError(err.message);
@@ -202,8 +204,8 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await auth.signup(email, password, name);
-      await auth.login(email, password);
+      await auth.signup(signUpEmail, signUpPassword, signUpName);
+      await auth.login(signUpEmail, signUpPassword);
       navigate('/');
     } catch (err) {
       setError(err.message);
@@ -358,6 +360,40 @@ export default function LoginPage() {
           animation: pulseLine 1.5s linear infinite;
           fill: none;
         }
+
+        @media (max-width: 768px) {
+          .auth-container {
+            flex-direction: column;
+            width: 100%;
+            min-height: 400px;
+            height: auto;
+            border-radius: 12px;
+          }
+          .form-container {
+            position: relative;
+            width: 100% !important;
+            padding: 32px 20px;
+            height: auto;
+            transform: none !important;
+            transition: none;
+          }
+          .sign-in-container.hidden-mobile,
+          .sign-up-container.hidden-mobile {
+            display: none !important;
+          }
+          .sign-in-container.visible-mobile,
+          .sign-up-container.visible-mobile {
+            display: flex !important;
+            opacity: 1 !important;
+            z-index: 2;
+          }
+          .overlay-container {
+            display: none !important;
+          }
+          .mobile-only {
+            display: block !important;
+          }
+        }
       `}</style>
 
       {/* 1. Header Navigation Bar */}
@@ -434,27 +470,27 @@ export default function LoginPage() {
             <div className={`auth-container ${isSignUpActive ? 'right-panel-active' : ''}`}>
               
               {/* Form 1: Sign Up */}
-              <div className="form-container sign-up-container">
+              <div className={`form-container sign-up-container ${isSignUpActive ? 'visible-mobile' : 'hidden-mobile'}`}>
                 <form onSubmit={handleSignUpSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <h2 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 10px 0', letterSpacing: '-0.5px', fontFamily: 'var(--font-header)' }}>Create Account</h2>
                   <div>
                     <label style={labelStyle}>Full Name</label>
                     <input
-                      type="text" value={name} onChange={e => setName(e.target.value)}
+                      type="text" value={signUpName} onChange={e => setSignUpName(e.target.value)}
                       placeholder="John Doe" required style={inputStyle}
                     />
                   </div>
                   <div>
                     <label style={labelStyle}>Email Address</label>
                     <input
-                      type="email" value={email} onChange={e => setEmail(e.target.value)}
+                      type="email" value={signUpEmail} onChange={e => setSignUpEmail(e.target.value)}
                       placeholder="you@company.com" required style={inputStyle}
                     />
                   </div>
                   <div>
                     <label style={labelStyle}>Password</label>
                     <input
-                      type="password" value={password} onChange={e => setPassword(e.target.value)}
+                      type="password" value={signUpPassword} onChange={e => setSignUpPassword(e.target.value)}
                       placeholder="••••••••" required style={inputStyle}
                     />
                   </div>
@@ -462,24 +498,31 @@ export default function LoginPage() {
                   <button type="submit" className="btn btn-primary" style={{ padding: '12px', marginTop: 10 }}>
                     {loading ? 'Registering...' : 'Sign Up'}
                   </button>
+                  
+                  <div className="mobile-only" style={{ display: 'none', textAlign: 'center', marginTop: 12, fontSize: 13 }}>
+                    Already have an account?{' '}
+                    <span onClick={() => setIsSignUpActive(false)} style={{ color: '#00A99D', fontWeight: 700, cursor: 'pointer' }}>
+                      Sign In
+                    </span>
+                  </div>
                 </form>
               </div>
 
               {/* Form 2: Sign In */}
-              <div className="form-container sign-in-container">
+              <div className={`form-container sign-in-container ${isSignUpActive ? 'hidden-mobile' : 'visible-mobile'}`}>
                 <form onSubmit={handleSignInSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <h2 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 10px 0', letterSpacing: '-0.5px', fontFamily: 'var(--font-header)' }}>Sign In</h2>
                   <div>
                     <label style={labelStyle}>Email Address</label>
                     <input
-                      type="email" value={email} onChange={e => setEmail(e.target.value)}
+                      type="email" value={signInEmail} onChange={e => setSignInEmail(e.target.value)}
                       placeholder="you@company.com" required style={inputStyle}
                     />
                   </div>
                   <div>
                     <label style={labelStyle}>Password</label>
                     <input
-                      type="password" value={password} onChange={e => setPassword(e.target.value)}
+                      type="password" value={signInPassword} onChange={e => setSignInPassword(e.target.value)}
                       placeholder="••••••••" required style={inputStyle}
                     />
                   </div>
@@ -487,6 +530,13 @@ export default function LoginPage() {
                   <button type="submit" className="btn btn-primary" style={{ padding: '12px', marginTop: 10 }}>
                     {loading ? 'Connecting...' : 'Sign In'}
                   </button>
+
+                  <div className="mobile-only" style={{ display: 'none', textAlign: 'center', marginTop: 12, fontSize: 13 }}>
+                    Don't have an account?{' '}
+                    <span onClick={() => setIsSignUpActive(true)} style={{ color: '#00A99D', fontWeight: 700, cursor: 'pointer' }}>
+                      Sign Up
+                    </span>
+                  </div>
                 </form>
               </div>
 

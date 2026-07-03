@@ -30,7 +30,18 @@ async function request(path, options = {}) {
       clearToken();
       window.location.href = '/login';
     }
-    const msg = data?.error?.message || `HTTP ${res.status}`;
+    let msg = data?.error?.message;
+    if (!msg && data?.detail) {
+      if (Array.isArray(data.detail)) {
+        msg = data.detail.map(d => {
+          const field = d.loc && d.loc.length > 1 ? d.loc[d.loc.length - 1] : '';
+          return field ? `${field} (${d.msg})` : d.msg;
+        }).join(', ');
+      } else {
+        msg = data.detail;
+      }
+    }
+    msg = msg || `HTTP ${res.status}`;
     throw new Error(msg);
   }
   return data;
