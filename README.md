@@ -20,9 +20,15 @@ A production-grade distributed background job scheduling platform built with **F
 
 ---
 
-## ⚙️ Setup Options
+## ⚙️ Clone & Setup
 
-You have two options to run the application on your computer:
+First, clone the repository and navigate to the project directory:
+```bash
+git clone https://github.com/Srevarshan05/distributed-job-scheduler
+cd distributed-job-scheduler
+```
+
+Choose one of the two options below to run the application:
 * **Option A (Easiest):** Run the entire stack inside Docker.
 * **Option B (Recommended for Dev):** Run the database in Docker, and run the FastAPI backend, workers, and React frontend natively on your host machine.
 
