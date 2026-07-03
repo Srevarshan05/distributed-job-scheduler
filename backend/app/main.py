@@ -9,9 +9,7 @@ Nothing else lives here — this file's only job is to assemble the app.
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
 
-from app.core.database import engine
 from app.core.errors import AppError, app_error_handler, unhandled_error_handler
 from app.routers.auth import router as auth_router
 from app.routers.health import router as health_router
@@ -24,10 +22,8 @@ from app.routers.workers import router as workers_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Ensure idempotency_key column exists
-    async with engine.begin() as conn:
-        await conn.execute(text("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);"))
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_jobs_idempotency_key ON jobs(idempotency_key);"))
+    # Migration 0004 now owns the idempotency_key column.
+    # Nothing to do here at startup.
     yield
 
 
@@ -72,8 +68,8 @@ async def add_correlation_id_and_log(request, call_next):
 # Tighten this to the deployed frontend URL in production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=["*"],  # nginx proxy handles Docker; tighten in production deployment
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

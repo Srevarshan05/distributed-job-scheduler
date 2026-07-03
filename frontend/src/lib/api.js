@@ -1,8 +1,9 @@
 // src/lib/api.js
 // Central API client — all fetch calls go through here.
-// BASE_URL reads from the Vite env var so dev/prod can differ without code changes.
+// In Docker: nginx proxies /api/* → backend container, so we use a relative path.
+// In local dev: set VITE_API_URL=http://localhost:8000/api/v1 in frontend/.env.local
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+const API_BASE = import.meta.env.VITE_API_URL || '/api/v1';
 const WS_BASE  = import.meta.env.VITE_WS_URL  || 'ws://localhost:8001/ws';
 
 // ── Token management ──────────────────────────────────────
