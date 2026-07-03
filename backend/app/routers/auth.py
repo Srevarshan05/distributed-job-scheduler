@@ -10,6 +10,7 @@ import uuid
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
@@ -36,7 +37,7 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)) -> Use
 
     Returns the created user. Raises 409 if the email is already registered.
     """
-    existing = await db.execute(select(User).where(User.email == body.email))
+    existing = await db.execute(select(User).where(func.lower(User.email) == func.lower(body.email)))
     if existing.scalar_one_or_none() is not None:
         raise ConflictError(f"Email '{body.email}' is already registered.")
 
@@ -76,7 +77,9 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> dict:
     logger = logging.getLogger("app.auth")
     logger.info(f"Login attempt for email: {body.email}")
 
-    result = await db.execute(select(User).where(User.email == body.email, User.is_active == True))  # noqa: E712
+    result = await db.execute(
+        select(User).where(func.lower(User.email) == func.lower(body.email), User.is_active == True)  # noqa: E712
+    )
     user = result.scalar_one_or_none()
 
     if user is None:

@@ -8,14 +8,19 @@ Fully isolated: failures or missing keys do not impact core scheduling logic.
 """
 import logging
 import os
+from dotenv import load_dotenv
+
+# Load env variables (including GROQ_API_KEY) from .env in root directory or current directory
+_root_env = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+if os.path.exists(_root_env):
+    load_dotenv(_root_env)
+else:
+    load_dotenv()
+
 from datetime import datetime, timezone
 import httpx
 from sqlalchemy import text
-from dotenv import load_dotenv
 from app.core.database import get_db_session
-
-# Load env variables (including GROQ_API_KEY) from .env in current working directory
-load_dotenv()
 
 logger = logging.getLogger("worker.ai_summary")
 
