@@ -13,7 +13,7 @@ COPY scripts/seed.py /app/scripts/seed.py
 
 # Copy and make entrypoint executable
 COPY backend/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 8000
 ENTRYPOINT ["/entrypoint.sh"]
