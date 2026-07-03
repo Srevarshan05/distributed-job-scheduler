@@ -175,6 +175,16 @@ async def main() -> None:
 
     if if_empty and await already_seeded(engine):
         print("==> Seed skipped: database already contains seed data.")
+        print("==> Ensuring admin user password is up to date with correct hash...")
+        from app.core.security import hash_password
+        SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+        async with SessionLocal() as db:
+            await db.execute(
+                text("UPDATE users SET hashed_password = :hash WHERE email = :email"),
+                {"email": SEED_EMAIL, "hash": hash_password(SEED_PASSWORD)},
+            )
+            await db.commit()
+        print("==> Admin password successfully updated.")
         await engine.dispose()
         return
 
